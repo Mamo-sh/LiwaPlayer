@@ -201,6 +201,7 @@
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
 
@@ -258,8 +259,17 @@
                                 Click="btnSearch_Click"/>
                     </Grid>
 
+                    <TextBlock x:Name="txtRecoTitle"
+                               Grid.Row="2"
+                               Text="✨ Sana özel öneriler"
+                               Foreground="{StaticResource AccentBrush}"
+                               FontSize="12"
+                               FontWeight="SemiBold"
+                               Margin="4,0,0,8"
+                               Visibility="Collapsed"/>
+
                     <ListView x:Name="lstResults"
-                              Grid.Row="2"
+                              Grid.Row="3"
                               Style="{StaticResource ModernList}"
                               MouseDoubleClick="lstResults_MouseDoubleClick">
                         <ListView.ItemTemplate>
@@ -330,7 +340,7 @@
                     </ListView>
 
                     <TextBlock x:Name="txtSearchHint"
-                               Grid.Row="2"
+                               Grid.Row="3"
                                Text="Şarkı veya sanatçı adı yazıp Enter'a basın.&#10;&#10;İpucu: Bir YouTube liste bağlantısı yapıştırırsan&#10;tamamı yeni bir listeye aktarılır."
                                Foreground="{StaticResource MutedBrush}"
                                TextWrapping="Wrap"
@@ -390,16 +400,27 @@
 
                     <!-- Çalan şarkı -->
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                        <Border Background="{StaticResource Surface3Brush}"
+                        <Border x:Name="coverBox"
+                                Background="{StaticResource Surface3Brush}"
                                 CornerRadius="8"
                                 Width="40" Height="40"
-                                Margin="0,0,10,0">
-                            <TextBlock Text="&#xE8D6;"
-                                       FontFamily="Segoe MDL2 Assets"
-                                       FontSize="18"
-                                       Foreground="{StaticResource AccentBrush}"
-                                       HorizontalAlignment="Center"
-                                       VerticalAlignment="Center"/>
+                                Margin="0,0,10,0"
+                                Cursor="Hand"
+                                ToolTip="Görselleştiriciyi aç"
+                                MouseLeftButtonUp="coverBox_MouseLeftButtonUp">
+                            <Grid>
+                                <TextBlock Text="&#xE8D6;"
+                                           FontFamily="Segoe MDL2 Assets"
+                                           FontSize="18"
+                                           Foreground="{StaticResource AccentBrush}"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center"/>
+                                <Border CornerRadius="8">
+                                    <Border.Background>
+                                        <ImageBrush x:Name="brushCover" Stretch="UniformToFill"/>
+                                    </Border.Background>
+                                </Border>
+                            </Grid>
                         </Border>
                         <StackPanel VerticalAlignment="Center" MaxWidth="260">
                             <TextBlock x:Name="txtSong"
@@ -492,6 +513,13 @@
                                 Content="&#xE8A3;"
                                 ToolTip="Arayüzü büyüt (Ctrl + tekerlek)"
                                 Click="btnZoomIn_Click"/>
+
+                        <Button x:Name="btnSettings"
+                                Style="{StaticResource IconButton}"
+                                FontSize="14"
+                                Content="&#xE713;"
+                                ToolTip="Optimizasyon ayarları"
+                                Click="btnSettings_Click"/>
                     </StackPanel>
                 </Grid>
             </Grid>

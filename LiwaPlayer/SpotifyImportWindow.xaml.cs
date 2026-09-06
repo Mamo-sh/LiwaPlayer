@@ -109,7 +109,8 @@ namespace LiwaPlayer
                             Title = match.Title,
                             Artist = match.Author,
                             Duration = match.Duration,
-                            Source = SongSource.YouTube
+                            Source = SongSource.YouTube,
+                            CoverImage = match.ThumbnailUrl
                         }, target, out _);
 
                         matched++;

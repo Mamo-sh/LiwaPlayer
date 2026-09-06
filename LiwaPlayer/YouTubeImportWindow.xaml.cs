@@ -92,7 +92,8 @@ namespace LiwaPlayer
                         Title = video.Title,
                         Artist = video.Author,
                         Duration = video.Duration,
-                        Source = SongSource.YouTube
+                        Source = SongSource.YouTube,
+                        CoverImage = video.ThumbnailUrl
                     }, target, out bool added);
 
                     if (added)

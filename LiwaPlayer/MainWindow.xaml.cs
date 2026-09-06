@@ -46,6 +46,9 @@ namespace LiwaPlayer
         private readonly UpdateService _updater = new();
         private bool _updateInProgress;
 
+        // Açık olan görselleştirici penceresi (kapaktan açılır)
+        private VisualizerWindow? _visualizer;
+
         public MainWindow()
         {
             InitializeComponent();
@@ -82,12 +85,110 @@ namespace LiwaPlayer
             _timer.Tick += Timer_Tick;
             _timer.Start();
 
-            // Açılıştan kısa süre sonra arka planda güncelleme denetle
+            ApplyOptimizationSettings();
+
             Loaded += async (_, _) =>
             {
-                await System.Threading.Tasks.Task.Delay(TimeSpan.FromSeconds(5));
-                await CheckForUpdatesAsync(silent: true);
+                // Ana ekranda YouTube ana sayfası gibi öneriler göster
+                await LoadRecommendationsAsync();
+
+                // Açılıştan kısa süre sonra arka planda güncelleme denetle
+                if (_settings.Current.CheckUpdatesOnStartup)
+                {
+                    await System.Threading.Tasks.Task.Delay(TimeSpan.FromSeconds(5));
+                    await CheckForUpdatesAsync(silent: true);
+                }
             };
+        }
+
+        // ═══════════════ Optimizasyon ayarları ═══════════════
+
+        private void ApplyOptimizationSettings()
+        {
+            var s = _settings.Current;
+
+            _player.NetworkCachingMs = Math.Clamp(s.NetworkCachingMs, 500, 15000);
+            YouTubeService.LoadThumbnails = s.ShowThumbnails;
+        }
+
+        private void btnSettings_Click(object sender, RoutedEventArgs e)
+        {
+            var window = new SettingsWindow(_settings) { Owner = this };
+
+            if (window.ShowDialog() == true)
+            {
+                ApplyOptimizationSettings();
+                SetStatus("Ayarlar kaydedildi.");
+            }
+        }
+
+        // ═══════════════ Öneriler ═══════════════
+
+        // Kitaplıktaki sanatçılardan rastgele seçip YouTube Music'te aratır;
+        // zaten listelerde olan şarkılar önerilmez. Kitaplık boşsa genel liste gelir.
+        private async System.Threading.Tasks.Task LoadRecommendationsAsync()
+        {
+            try
+            {
+                var allSongs = _playlist.Playlists.SelectMany(p => p.Songs).ToList();
+
+                var seeds = allSongs
+                    .Select(s => s.Artist)
+                    .Where(a => !string.IsNullOrWhiteSpace(a))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(_ => _random.Next())
+                    .Take(3)
+                    .ToList();
+
+                var pool = new System.Collections.Generic.List<YouTubeSearchResult>();
+
+                if (seeds.Count == 0)
+                {
+                    pool.AddRange(await _youtube.SearchMusicAsync("en çok dinlenen şarkılar", 20));
+                }
+                else
+                {
+                    foreach (var seed in seeds)
+                    {
+                        try
+                        {
+                            pool.AddRange(await _youtube.SearchMusicAsync(seed, 8));
+                        }
+                        catch
+                        {
+                            // Tek sanatçının araması patlarsa diğerleriyle devam
+                        }
+                    }
+                }
+
+                var known = allSongs
+                    .Where(s => s.Source == SongSource.YouTube)
+                    .Select(s => s.FileName)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                var recommendations = pool
+                    .GroupBy(r => r.VideoId)
+                    .Select(g => g.First())
+                    .Where(r => !known.Contains(r.VideoId))
+                    .OrderBy(_ => _random.Next())
+                    .Take(20)
+                    .ToList();
+
+                if (recommendations.Count == 0)
+                    return;
+
+                // Kullanıcı bu arada arama yaptıysa önerilerle üzerine yazma
+                if (!string.IsNullOrWhiteSpace(txtSearch.Text))
+                    return;
+
+                lstResults.ItemsSource = recommendations;
+                txtRecoTitle.Visibility = Visibility.Visible;
+                txtSearchHint.Visibility = Visibility.Collapsed;
+            }
+            catch (Exception ex)
+            {
+                LogService.Write("Öneriler yüklenemedi", ex);
+            }
         }
 
         // ═══════════════ Güncelleme ═══════════════
@@ -403,6 +504,42 @@ namespace LiwaPlayer
 
         private void SetStatus(string message) => txtStatus.Text = message;
 
+        // ═══════════════ Kapak ve görselleştirici ═══════════════
+
+        private void SetCoverImage(string url)
+        {
+            try
+            {
+                brushCover.ImageSource = string.IsNullOrWhiteSpace(url)
+                    ? null
+                    : new System.Windows.Media.Imaging.BitmapImage(new Uri(url));
+            }
+            catch
+            {
+                brushCover.ImageSource = null;
+            }
+        }
+
+        private void coverBox_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+        {
+            if (_visualizer != null)
+            {
+                _visualizer.Activate();
+                return;
+            }
+
+            _visualizer = new VisualizerWindow(() => _player.IsPlaying) { Owner = this };
+
+            _visualizer.Closed += (_, _) => _visualizer = null;
+
+            var song = _playlist.CurrentSong;
+
+            if (song != null)
+                _visualizer.UpdateSong(song.Title, song.Artist, song.CoverImage);
+
+            _visualizer.Show();
+        }
+
         private static string FormatSongLabel(Song song) =>
             string.IsNullOrWhiteSpace(song.Artist)
                 ? song.Title
@@ -463,6 +600,9 @@ namespace LiwaPlayer
 
             txtSong.Text = FormatSongLabel(song);
             Title = "LiwaPlayer — " + song.Title;
+
+            SetCoverImage(song.CoverImage);
+            _visualizer?.UpdateSong(song.Title, song.Artist, song.CoverImage);
 
             if (_tray != null)
             {
@@ -569,12 +709,78 @@ namespace LiwaPlayer
 
             if (!shuffle && !repeat && isLast)
             {
+                // Ayar açıksa benzer şarkı bulup listeye ekleyerek devam et
+                if (_settings.Current.AutoContinue)
+                {
+                    _ = AutoContinueAsync(playlist, _playlist.CurrentSong);
+                    return;
+                }
+
                 SetStatus("Liste bitti.");
                 sliderPosition.Value = 0;
                 return;
             }
 
             PlaySong(GetNextSong(), playlist);
+        }
+
+        // Liste bittiğinde son çalan şarkının sanatçısına göre benzer bir şarkı
+        // bulur, listeye ekler ve çalar (Optimizasyon Ayarları → Oynatma'dan açılır)
+        private async System.Threading.Tasks.Task AutoContinueAsync(Playlist playlist, Song lastSong)
+        {
+            try
+            {
+                SetStatus("Benzer şarkı aranıyor...");
+
+                var query = string.IsNullOrWhiteSpace(lastSong.Artist)
+                    ? lastSong.Title
+                    : lastSong.Artist;
+
+                System.Collections.Generic.List<YouTubeSearchResult> results;
+
+                try
+                {
+                    results = await _youtube.SearchMusicAsync(query, 15);
+                }
+                catch
+                {
+                    results = await _youtube.SearchAsync(query, 15);
+                }
+
+                var known = playlist.Songs
+                    .Where(s => s.Source == SongSource.YouTube)
+                    .Select(s => s.FileName)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                var pick = results
+                    .Where(r => !known.Contains(r.VideoId))
+                    .OrderBy(_ => _random.Next())
+                    .FirstOrDefault();
+
+                if (pick == null)
+                {
+                    SetStatus("Liste bitti (benzer şarkı bulunamadı).");
+                    return;
+                }
+
+                var song = _playlist.Add(new Song
+                {
+                    FileName = pick.VideoId,
+                    Title = pick.Title,
+                    Artist = pick.Author,
+                    Duration = pick.Duration,
+                    Source = SongSource.YouTube,
+                    CoverImage = pick.ThumbnailUrl
+                }, playlist, out _);
+
+                PlaySong(song, playlist);
+                SetStatus($"✨ Otomatik eklendi: {pick.Title}");
+            }
+            catch (Exception ex)
+            {
+                LogService.Write("Otomatik devam", ex);
+                SetStatus("Liste bitti.");
+            }
         }
 
         // ═══════════════ Oynatıcı butonları ═══════════════
@@ -889,8 +1095,12 @@ namespace LiwaPlayer
         {
             var query = txtSearch.Text.Trim();
 
+            // Boş aramada öneriler tazelenir
             if (query.Length == 0)
+            {
+                await LoadRecommendationsAsync();
                 return;
+            }
 
             // Arama kutusuna liste bağlantısı yapıştırıldıysa içe aktar
             if (query.Contains("list=", StringComparison.OrdinalIgnoreCase))
@@ -901,14 +1111,17 @@ namespace LiwaPlayer
 
             btnSearch.IsEnabled = false;
             lstResults.ItemsSource = null;
+            txtRecoTitle.Visibility = Visibility.Collapsed;
             txtSearchHint.Text = "Aranıyor...";
             txtSearchHint.Visibility = Visibility.Visible;
 
             try
             {
+                int max = Math.Clamp(_settings.Current.SearchResultCount, 5, 50);
+
                 var results = rbSearchMusic.IsChecked == true
-                    ? await _youtube.SearchMusicAsync(query)
-                    : await _youtube.SearchAsync(query);
+                    ? await _youtube.SearchMusicAsync(query, max)
+                    : await _youtube.SearchAsync(query, max);
 
                 lstResults.ItemsSource = results;
 
@@ -1005,7 +1218,8 @@ namespace LiwaPlayer
                 Title = result.Title,
                 Artist = result.Author,
                 Duration = result.Duration,
-                Source = SongSource.YouTube
+                Source = SongSource.YouTube,
+                CoverImage = result.ThumbnailUrl
             };
 
             target = ResolveTargetPlaylist(result.Title);

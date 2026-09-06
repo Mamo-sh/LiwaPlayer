@@ -32,6 +32,10 @@ namespace LiwaPlayer.Services
 
     public class YouTubeService
     {
+        // Optimizasyon ayarı: kapak resimleri kapalıysa URL hiç doldurulmaz,
+        // arayüz de indirmez (düşük RAM/bant genişliği)
+        public static bool LoadThumbnails = true;
+
         private static readonly HttpClient Http = CreateHttpClient();
 
         // Girişsiz istemci her zaman durur; giriş yapılınca ikinci (çerezli)
@@ -227,7 +231,7 @@ namespace LiwaPlayer.Services
         // Liste görünümü için küçük boyutlu kapak yeterli; büyükleri indirip RAM harcamayalım
         private static string PickThumbnail(List<(string Url, int Width)> thumbnails)
         {
-            if (thumbnails.Count == 0)
+            if (!LoadThumbnails || thumbnails.Count == 0)
                 return "";
 
             var small = thumbnails
@@ -256,7 +260,10 @@ namespace LiwaPlayer.Services
                     VideoId = video.Id,
                     Title = video.Title,
                     Author = video.Author.ChannelTitle,
-                    Duration = video.Duration ?? TimeSpan.Zero
+                    Duration = video.Duration ?? TimeSpan.Zero,
+                    ThumbnailUrl = PickThumbnail(video.Thumbnails
+                        .Select(t => (t.Url, t.Resolution.Width))
+                        .ToList())
                 });
 
                 if (videos.Count >= maxVideos)
@@ -284,7 +291,10 @@ namespace LiwaPlayer.Services
                     VideoId = video.Id,
                     Title = video.Title,
                     Author = video.Author.ChannelTitle,
-                    Duration = video.Duration ?? TimeSpan.Zero
+                    Duration = video.Duration ?? TimeSpan.Zero,
+                    ThumbnailUrl = PickThumbnail(video.Thumbnails
+                        .Select(t => (t.Url, t.Resolution.Width))
+                        .ToList())
                 };
             }
         }

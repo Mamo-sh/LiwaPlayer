@@ -33,6 +33,18 @@ namespace LiwaPlayer
                 return;
             }
 
+            // Optimizasyon ayarı: zayıf ekran kartlarında yazılım tabanlı çizim
+            // (pencere oluşmadan önce, süreç genelinde uygulanmalı)
+            try
+            {
+                if (new Services.SettingsService().Current.SoftwareRendering)
+                    System.Windows.Media.RenderOptions.ProcessRenderMode =
+                        System.Windows.Interop.RenderMode.SoftwareOnly;
+            }
+            catch
+            {
+            }
+
             // İkinci kopyalardan gelecek "göster" sinyalini arka planda dinle
             _showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ShowEventName);
 

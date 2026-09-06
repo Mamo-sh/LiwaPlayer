@@ -27,6 +27,9 @@ namespace LiwaPlayer.Services
 
         public bool IsPlaying => _mediaPlayer.IsPlaying;
 
+        // YouTube akışları için ağ önbelleği; optimizasyon ayarlarından değişir
+        public int NetworkCachingMs { get; set; } = 3000;
+
         public bool HasMedia => _mediaPlayer.Media != null;
 
         public int Volume
@@ -55,7 +58,7 @@ namespace LiwaPlayer.Services
             bool isRemote = location.StartsWith("http", StringComparison.OrdinalIgnoreCase);
 
             _currentMedia = isRemote
-                ? new Media(_libVLC, new Uri(location), ":network-caching=3000")
+                ? new Media(_libVLC, new Uri(location), $":network-caching={NetworkCachingMs}")
                 : new Media(_libVLC, new Uri(location));
 
             _mediaPlayer.Play(_currentMedia);

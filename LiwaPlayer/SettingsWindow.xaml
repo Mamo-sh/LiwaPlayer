@@ -1,0 +1,134 @@
+<Window x:Class="LiwaPlayer.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Optimizasyon Ayarları"
+        Height="560"
+        Width="480"
+        MinHeight="480"
+        MinWidth="420"
+        Background="{StaticResource BgBrush}"
+        FontFamily="Segoe UI"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False">
+
+    <Grid Margin="18">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+
+                <!-- ═══ Performans ═══ -->
+                <TextBlock Text="⚡ Performans"
+                           Style="{StaticResource PanelTitle}"
+                           Margin="0,0,0,10"/>
+
+                <CheckBox x:Name="chkThumbnails"
+                          Style="{StaticResource DarkCheckBox}"
+                          Content="Kapak resimlerini göster"
+                          Margin="0,0,0,4"/>
+                <TextBlock Text="Kapatınca arama sonuçlarında resim indirilmez; RAM ve internet kullanımı azalır."
+                           Style="{StaticResource MutedText}"
+                           FontSize="11"
+                           TextWrapping="Wrap"
+                           Margin="27,0,0,12"/>
+
+                <CheckBox x:Name="chkSoftwareRender"
+                          Style="{StaticResource DarkCheckBox}"
+                          Content="Yazılım tabanlı çizim kullan"
+                          Margin="0,0,0,4"/>
+                <TextBlock Text="Zayıf/sorunlu ekran kartı olan makinelerde görüntü bozukluklarını giderir. Değişiklik uygulama yeniden açılınca etkinleşir."
+                           Style="{StaticResource MutedText}"
+                           FontSize="11"
+                           TextWrapping="Wrap"
+                           Margin="27,0,0,12"/>
+
+                <TextBlock Text="Arama sonucu sayısı"
+                           Foreground="{StaticResource TextBrush}"
+                           FontSize="13"
+                           Margin="0,0,0,6"/>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                    <RadioButton x:Name="rbResults10" Style="{StaticResource TabButton}" Content="10" GroupName="results"/>
+                    <RadioButton x:Name="rbResults20" Style="{StaticResource TabButton}" Content="20" GroupName="results" Margin="4,0,0,0"/>
+                    <RadioButton x:Name="rbResults30" Style="{StaticResource TabButton}" Content="30" GroupName="results" Margin="4,0,0,0"/>
+                    <TextBlock Text="az sonuç = hızlı arama"
+                               Style="{StaticResource MutedText}"
+                               FontSize="11"
+                               Margin="10,0,0,0"/>
+                </StackPanel>
+
+                <TextBlock Text="Ağ önbelleği (takılma/kesilme olursa yükseltin)"
+                           Foreground="{StaticResource TextBrush}"
+                           FontSize="13"
+                           Margin="0,0,0,6"/>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
+                    <RadioButton x:Name="rbCacheLow" Style="{StaticResource TabButton}" Content="Düşük (1 sn)" GroupName="cache"/>
+                    <RadioButton x:Name="rbCacheNormal" Style="{StaticResource TabButton}" Content="Normal (3 sn)" GroupName="cache" Margin="4,0,0,0"/>
+                    <RadioButton x:Name="rbCacheHigh" Style="{StaticResource TabButton}" Content="Yüksek (8 sn)" GroupName="cache" Margin="4,0,0,0"/>
+                </StackPanel>
+
+                <Border Height="1" Background="{StaticResource LineBrush}" Margin="0,0,0,14"/>
+
+                <!-- ═══ Oynatma ═══ -->
+                <TextBlock Text="🎵 Oynatma"
+                           Style="{StaticResource PanelTitle}"
+                           Margin="0,0,0,10"/>
+
+                <CheckBox x:Name="chkAutoContinue"
+                          Style="{StaticResource DarkCheckBox}"
+                          Content="Liste bitince benzer şarkılarla devam et"
+                          Margin="0,0,0,4"/>
+                <TextBlock Text="Listedeki son şarkı bittiğinde çalan sanatçıya benzer bir şarkı otomatik bulunur, listeye eklenir ve çalmaya devam eder."
+                           Style="{StaticResource MutedText}"
+                           FontSize="11"
+                           TextWrapping="Wrap"
+                           Margin="27,0,0,16"/>
+
+                <Border Height="1" Background="{StaticResource LineBrush}" Margin="0,0,0,14"/>
+
+                <!-- ═══ Genel ═══ -->
+                <TextBlock Text="⚙ Genel"
+                           Style="{StaticResource PanelTitle}"
+                           Margin="0,0,0,10"/>
+
+                <CheckBox x:Name="chkUpdates"
+                          Style="{StaticResource DarkCheckBox}"
+                          Content="Açılışta güncellemeleri denetle"
+                          Margin="0,0,0,4"/>
+                <TextBlock Text="Kapatsan bile tepsi menüsünden elle denetleyebilirsin."
+                           Style="{StaticResource MutedText}"
+                           FontSize="11"
+                           TextWrapping="Wrap"
+                           Margin="27,0,0,4"/>
+            </StackPanel>
+        </ScrollViewer>
+
+        <Grid Grid.Row="1" Margin="0,14,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <TextBlock x:Name="txtVersion"
+                       Style="{StaticResource MutedText}"
+                       FontSize="11"
+                       VerticalAlignment="Center"
+                       Text=""/>
+
+            <Button Grid.Column="1"
+                    Style="{StaticResource SecondaryTextButton}"
+                    Content="Vazgeç"
+                    Margin="0,0,8,0"
+                    Click="btnCancel_Click"/>
+
+            <Button Grid.Column="2"
+                    Style="{StaticResource TextButton}"
+                    Content="Kaydet"
+                    Click="btnSave_Click"/>
+        </Grid>
+    </Grid>
+
+</Window>
