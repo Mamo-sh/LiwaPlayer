@@ -1,0 +1,17 @@
+# Derleme çıktıları
+[Bb]in/
+[Oo]bj/
+[Pp]ublish/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+
+# Installer çıktıları
+Installer/Output/
+Installer/publish/
+
+# Çalışma zamanı verileri
+Data/
+log.txt

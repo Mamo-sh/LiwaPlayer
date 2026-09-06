@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationIcon>lwplay.ico</ApplicationIcon>
+    <Version>1.0.0</Version>
+    <Company>Liwa</Company>
+    <Product>LiwaPlayer</Product>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="LibVLCSharp.WPF" Version="3.10.0" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2903.40" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+    <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.23.1" />
+    <PackageReference Include="YoutubeExplode" Version="6.6.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\youtube-logo.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- WinForms'un otomatik global using'i WPF tipleriyle (Application,
+         KeyEventArgs, MessageBox) çakışıyor; tray için WinForms takma adla kullanılıyor -->
+    <Using Remove="System.Windows.Forms" />
+  </ItemGroup>
+
+</Project>

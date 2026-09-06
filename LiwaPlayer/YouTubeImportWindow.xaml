@@ -1,0 +1,77 @@
+<Window x:Class="LiwaPlayer.YouTubeImportWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="YouTube Listesi İçe Aktar"
+        Height="560"
+        Width="520"
+        MinHeight="420"
+        MinWidth="440"
+        Background="{StaticResource BgBrush}"
+        FontFamily="Segoe UI"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        Closing="Window_Closing">
+
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Text="YouTube liste veya albüm bağlantısını yapıştırın"
+                   Style="{StaticResource PanelTitle}"
+                   Margin="2,0,0,8"/>
+
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <TextBox x:Name="txtUrl"
+                     Style="{StaticResource SearchBox}"
+                     KeyDown="txtUrl_KeyDown"/>
+
+            <Button x:Name="btnImport"
+                    Grid.Column="1"
+                    Style="{StaticResource TextButton}"
+                    Content="İçe Aktar"
+                    Margin="8,0,0,0"
+                    Click="btnImport_Click"/>
+        </Grid>
+
+        <TextBlock Grid.Row="2"
+                   Style="{StaticResource MutedText}"
+                   FontSize="11"
+                   Margin="2,8,0,0"
+                   TextWrapping="Wrap"
+                   Text="youtube.com ve music.youtube.com bağlantıları desteklenir. Albümler için YouTube Music'te albümün Paylaş bağlantısını kullanın (list= içerir). Girişliysen kendi özel listelerin de çekilebilir."/>
+
+        <TextBlock x:Name="txtProgress"
+                   Grid.Row="3"
+                   Style="{StaticResource MutedText}"
+                   FontSize="12"
+                   Margin="2,12,0,10"
+                   Text="Hazır."
+                   TextTrimming="CharacterEllipsis"/>
+
+        <Border Grid.Row="4" Style="{StaticResource Panel}">
+            <ListView x:Name="lstLog"
+                      Style="{StaticResource ModernList}"
+                      Margin="6">
+                <ListView.ItemTemplate>
+                    <DataTemplate>
+                        <TextBlock Text="{Binding}"
+                                   FontSize="12"
+                                   Foreground="{StaticResource MutedBrush}"
+                                   TextTrimming="CharacterEllipsis"/>
+                    </DataTemplate>
+                </ListView.ItemTemplate>
+            </ListView>
+        </Border>
+    </Grid>
+
+</Window>
