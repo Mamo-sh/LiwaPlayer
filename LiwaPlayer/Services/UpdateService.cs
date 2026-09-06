@@ -26,7 +26,7 @@ namespace LiwaPlayer.Services
     public class UpdateService
     {
         // Güncellemelerin çekildiği GitHub deposu
-        public const string RepoOwner = "";
+        public const string RepoOwner = "Mamo-sh";
         public const string RepoName = "LiwaPlayer";
 
         public static bool IsConfigured => RepoOwner.Length > 0;
