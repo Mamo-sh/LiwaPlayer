@@ -13,8 +13,9 @@ using Point = System.Windows.Point;
 
 namespace LiwaPlayer
 {
-    // Görselleştirici: üç ışık stili + klip modu. Klipli (YouTube) şarkılarda
-    // pencere açılınca video otomatik oynar; tıklamayla stiller arasında dönülür.
+    // Görselleştirici: üç ışık stili + klip modu. Kontroller alttaki çubukta
+    // (Stil / Klip / Tam Ekran / Kapat) — video yerel pencerede çizildiği için
+    // videonun üzerine tıklama güvenilir değildir; butonlar videonun dışındadır.
     // Işık stilleri gerçek spektrum analizi yapmaz (POS işlemcisini yormamak için).
     public partial class VisualizerWindow : Window
     {
@@ -41,14 +42,19 @@ namespace LiwaPlayer
         private bool _videoActive;
         private bool _switching;
 
-        // Son seçilen stil oturum boyunca hatırlanır; pencere yeniden
-        // açıldığında kullanıcının tercihiyle başlar
+        // Son seçilen stil oturum boyunca hatırlanır
         private static int _lastMode = 1;
 
-        // Tek tık (stil değiştir) ile çift tık (tam ekran) ayrımı: tek tık
-        // kısa bir gecikmeyle işlenir, çift tık gelirse iptal edilir
+        // Video yüzeyi her klip girişinde sıfırdan oluşturulur, çıkışta yok
+        // edilir; kalıcı olursa WPF o bölgeyi yeniden çizemiyor (kazı kazan izi)
+        private LibVLCSharp.WPF.VideoView? _videoView;
+
+        // Tek tık (stil değiştir) ile çift tık (tam ekran) ayrımı
         private readonly DispatcherTimer _clickTimer = new() { Interval = TimeSpan.FromMilliseconds(280) };
         private bool _suppressNextClick;
+
+        private readonly DispatcherTimer _hintTimer = new() { Interval = TimeSpan.FromSeconds(2.5) };
+        private string _barText = "";
 
         private WindowState _restoreState;
         private WindowStyle _restoreStyle;
@@ -86,23 +92,33 @@ namespace LiwaPlayer
             _timer.Tick += Timer_Tick;
             _timer.Start();
 
-            _clickTimer.Tick += async (_, _) =>
+            _clickTimer.Tick += (_, _) =>
             {
                 _clickTimer.Stop();
-                await CycleModeAsync();
+                CycleLightStyle();
             };
 
-            // Işık stiliyle açılır; klip, tıklama döngüsündeki seçeneklerden biridir.
-            // Son seçilen stil (klip dahil) hatırlanır.
+            _hintTimer.Tick += (_, _) =>
+            {
+                _hintTimer.Stop();
+                txtBarTitle.Text = _barText;
+            };
+
+            // Son seçilen stille açılır (klipte bırakıldıysa klipten devam)
             Loaded += async (_, _) =>
             {
                 if (_lastMode == 0)
-                    await TryEnterVideoModeAsync(fallbackMode: 1);
+                    await EnterVideoModeAsync();
                 else
                     _mode = _lastMode;
             };
 
-            Closed += (_, _) => _timer.Stop();
+            Closed += (_, _) =>
+            {
+                _timer.Stop();
+                _clickTimer.Stop();
+                _hintTimer.Stop();
+            };
         }
 
         private Rectangle MakeBar(Color color, double opacity) => new()
@@ -121,9 +137,8 @@ namespace LiwaPlayer
             txtVisTitle.Text = title;
             txtVisArtist.Text = artist;
 
-            txtOverlayTitle.Text = string.IsNullOrWhiteSpace(artist)
-                ? title
-                : $"{title} — {artist}";
+            _barText = string.IsNullOrWhiteSpace(artist) ? title : $"{title} — {artist}";
+            txtBarTitle.Text = _barText;
 
             try
             {
@@ -137,22 +152,33 @@ namespace LiwaPlayer
             }
         }
 
+        private void ShowBarHint(string text)
+        {
+            txtBarTitle.Text = text;
+            _hintTimer.Stop();
+            _hintTimer.Start();
+        }
+
         // ═══════════ Klip modu ═══════════
 
-        private async Task TryEnterVideoModeAsync(int fallbackMode)
+        private async Task EnterVideoModeAsync()
         {
             if (_switching)
                 return;
 
             _switching = true;
+            btnClip.IsEnabled = false;
 
             try
             {
-                // Video yüzeyini hazırla (HWND oluşması için önce görünür olmalı)
-                videoView.Visibility = Visibility.Visible;
+                // Video yüzeyini sıfırdan oluştur (HWND için önce görünür olmalı)
+                _videoView = new LibVLCSharp.WPF.VideoView();
+
+                videoHost.Content = _videoView;
+                videoHost.Visibility = Visibility.Visible;
                 UpdateLayout();
 
-                videoView.MediaPlayer = _mediaPlayer;
+                _videoView.MediaPlayer = _mediaPlayer;
 
                 bool ok = await _switchToVideo();
 
@@ -164,58 +190,39 @@ namespace LiwaPlayer
 
                     canvas.Visibility = Visibility.Collapsed;
                     infoPanel.Visibility = Visibility.Collapsed;
+                    btnClip.Content = "Klibi Kapat";
                 }
                 else
                 {
-                    videoView.MediaPlayer = null;
-                    videoView.Visibility = Visibility.Collapsed;
-
-                    _mode = fallbackMode;
-                    _lastMode = fallbackMode;
-                    _videoActive = false;
-
-                    canvas.Visibility = Visibility.Visible;
-                    infoPanel.Visibility = Visibility.Visible;
-
-                    InvalidateVisual();
+                    DestroyVideoSurface();
+                    ShowBarHint("Bu şarkının klibi yok.");
                 }
             }
             catch
             {
-                videoView.MediaPlayer = null;
-                videoView.Visibility = Visibility.Collapsed;
-                _mode = fallbackMode;
-                _videoActive = false;
+                DestroyVideoSurface();
             }
             finally
             {
                 _switching = false;
+                btnClip.IsEnabled = true;
             }
         }
 
-        private async Task LeaveVideoModeAsync(int newMode)
+        private async Task LeaveVideoModeAsync()
         {
             if (_switching)
                 return;
 
             _switching = true;
+            btnClip.IsEnabled = false;
 
             try
             {
-                // Video penceresini oynatıcıdan tamamen ayır; ayrılmazsa WPF o
-                // bölgeyi yeniden çizemiyor ve "kazı kazan" görüntüsü kalıyor
-                videoView.MediaPlayer = null;
-                videoView.Visibility = Visibility.Collapsed;
+                DestroyVideoSurface();
 
-                canvas.Visibility = Visibility.Visible;
-                infoPanel.Visibility = Visibility.Visible;
-
-                _mode = newMode;
-                _lastMode = newMode;
+                _mode = _lastMode = 1;
                 _videoActive = false;
-
-                InvalidateVisual();
-                UpdateLayout();
 
                 await _switchToAudio();
             }
@@ -225,7 +232,39 @@ namespace LiwaPlayer
             finally
             {
                 _switching = false;
+                btnClip.IsEnabled = true;
+                Render();
             }
+        }
+
+        private void DestroyVideoSurface()
+        {
+            _videoActive = false;
+
+            if (_videoView != null)
+            {
+                try
+                {
+                    _videoView.MediaPlayer = null;
+                    _videoView.Dispose();
+                }
+                catch
+                {
+                }
+
+                _videoView = null;
+            }
+
+            videoHost.Content = null;
+            videoHost.Visibility = Visibility.Collapsed;
+
+            canvas.Visibility = Visibility.Visible;
+            infoPanel.Visibility = Visibility.Visible;
+            btnClip.Content = "Klip";
+
+            // Video bölgesinin kalıntısız yeniden çizilmesini garanti et
+            InvalidateVisual();
+            UpdateLayout();
         }
 
         // ═══════════ Animasyon ═══════════
@@ -358,9 +397,20 @@ namespace LiwaPlayer
 
         // ═══════════ Etkileşim ═══════════
 
-        private void Window_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+        // Işık stilleri arasında döner (1 → 2 → 3 → 1); klip yalnızca butonla açılır
+        private void CycleLightStyle()
         {
-            // Çift tıkın ikinci bırakması stil değiştirmesin
+            if (_videoActive || _switching)
+                return;
+
+            _mode = _mode >= 3 ? 1 : _mode + 1;
+            _lastMode = _mode;
+
+            Render();
+        }
+
+        private void stage_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+        {
             if (_suppressNextClick)
             {
                 _suppressNextClick = false;
@@ -371,47 +421,39 @@ namespace LiwaPlayer
             _clickTimer.Start();
         }
 
-        private void Window_MouseDoubleClick(object sender, MouseButtonEventArgs e)
-        {
-            _clickTimer.Stop();
-            _suppressNextClick = true;
-
-            ToggleFullscreen();
-            Activate();
-        }
-
-        // Grid'de MouseDoubleClick olayı yok; çift tık ClickCount ile yakalanır
-        private void overlayRoot_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        private void stage_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
             if (e.ClickCount == 2)
-                Window_MouseDoubleClick(sender, e);
+            {
+                _clickTimer.Stop();
+                _suppressNextClick = true;
+                ToggleFullscreen();
+            }
         }
 
-        // Döngü: çubuklar → ayna → halka → klip → çubuklar ...
-        private async Task CycleModeAsync()
+        private void btnStyle_Click(object sender, RoutedEventArgs e)
         {
-            if (_switching)
-                return;
-
             if (_videoActive)
             {
-                await LeaveVideoModeAsync(newMode: 1);
-            }
-            else if (_mode >= 3)
-            {
-                await TryEnterVideoModeAsync(fallbackMode: 1);
-            }
-            else
-            {
-                _mode++;
-                _lastMode = _mode;
+                // Klipteyken Stil'e basılırsa klipten çıkıp ışık stiline dön
+                _ = LeaveVideoModeAsync();
+                return;
             }
 
-            // Klavye odağı video katmanında kalmasın (Esc çalışmaya devam etsin)
-            Activate();
-
-            Render();
+            CycleLightStyle();
         }
+
+        private async void btnClip_Click(object sender, RoutedEventArgs e)
+        {
+            if (_videoActive)
+                await LeaveVideoModeAsync();
+            else
+                await EnterVideoModeAsync();
+        }
+
+        private void btnFull_Click(object sender, RoutedEventArgs e) => ToggleFullscreen();
+
+        private void btnCloseVis_Click(object sender, RoutedEventArgs e) => Close();
 
         private void Window_KeyDown(object sender, KeyEventArgs e)
         {
@@ -448,6 +490,8 @@ namespace LiwaPlayer
                 WindowState = _restoreState;
                 _fullscreen = false;
             }
+
+            Activate();
         }
 
         private void Window_SizeChanged(object sender, SizeChangedEventArgs e) => Render();
@@ -457,14 +501,12 @@ namespace LiwaPlayer
             // Pencere kapanırken video moddaysak sese geri dön (CPU tasarrufu)
             try
             {
-                if (_videoActive)
-                {
-                    _videoActive = false;
-                    await _switchToAudio();
-                }
+                bool wasVideo = _videoActive;
 
-                videoView.MediaPlayer = null;
-                videoView.Dispose();
+                DestroyVideoSurface();
+
+                if (wasVideo)
+                    await _switchToAudio();
             }
             catch
             {

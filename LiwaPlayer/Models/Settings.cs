@@ -35,6 +35,9 @@ namespace LiwaPlayer.Models
         // Liste bitince benzer şarkı bulup çalmaya devam et
         public bool AutoContinue { get; set; } = false;
 
+        // Görselleştiriciyi tamamen devre dışı bırak (kapak tıklaması pencere açmaz)
+        public bool DisableVisualizer { get; set; } = false;
+
         public double WindowWidth { get; set; } = 1000;
 
         public double WindowHeight { get; set; } = 620;

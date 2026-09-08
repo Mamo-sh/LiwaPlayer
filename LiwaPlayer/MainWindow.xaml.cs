@@ -522,6 +522,12 @@ namespace LiwaPlayer
 
         private void coverBox_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
         {
+            if (_settings.Current.DisableVisualizer)
+            {
+                SetStatus("Görselleştirici ayarlardan devre dışı bırakılmış.");
+                return;
+            }
+
             if (_visualizer != null)
             {
                 _visualizer.Activate();

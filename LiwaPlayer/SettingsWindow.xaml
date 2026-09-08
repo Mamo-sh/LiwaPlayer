@@ -35,6 +35,16 @@
                            TextWrapping="Wrap"
                            Margin="27,0,0,12"/>
 
+                <CheckBox x:Name="chkDisableVisualizer"
+                          Style="{StaticResource DarkCheckBox}"
+                          Content="Görselleştiriciyi devre dışı bırak"
+                          Margin="0,0,0,4"/>
+                <TextBlock Text="Kapak resmine tıklanınca görselleştirici penceresi açılmaz. Zayıf makinelerde önerilir."
+                           Style="{StaticResource MutedText}"
+                           FontSize="11"
+                           TextWrapping="Wrap"
+                           Margin="27,0,0,12"/>
+
                 <CheckBox x:Name="chkSoftwareRender"
                           Style="{StaticResource DarkCheckBox}"
                           Content="Yazılım tabanlı çizim kullan"

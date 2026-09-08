@@ -19,6 +19,7 @@ namespace LiwaPlayer
             var s = _settings.Current;
 
             chkThumbnails.IsChecked = s.ShowThumbnails;
+            chkDisableVisualizer.IsChecked = s.DisableVisualizer;
             chkSoftwareRender.IsChecked = s.SoftwareRendering;
             chkAutoContinue.IsChecked = s.AutoContinue;
             chkUpdates.IsChecked = s.CheckUpdatesOnStartup;
@@ -47,6 +48,7 @@ namespace LiwaPlayer
             bool renderChanged = s.SoftwareRendering != (chkSoftwareRender.IsChecked == true);
 
             s.ShowThumbnails = chkThumbnails.IsChecked == true;
+            s.DisableVisualizer = chkDisableVisualizer.IsChecked == true;
             s.SoftwareRendering = chkSoftwareRender.IsChecked == true;
             s.AutoContinue = chkAutoContinue.IsChecked == true;
             s.CheckUpdatesOnStartup = chkUpdates.IsChecked == true;
