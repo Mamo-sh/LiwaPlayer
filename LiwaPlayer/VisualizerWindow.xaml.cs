@@ -142,9 +142,20 @@ namespace LiwaPlayer
 
             try
             {
-                brushArt.ImageSource = string.IsNullOrWhiteSpace(coverUrl)
-                    ? null
-                    : new BitmapImage(new Uri(coverUrl));
+                if (string.IsNullOrWhiteSpace(coverUrl))
+                {
+                    brushArt.ImageSource = null;
+                    return;
+                }
+
+                // 220px'lik kutu için sınırlı çözünürlük (bellek tasarrufu)
+                var image = new BitmapImage();
+                image.BeginInit();
+                image.UriSource = new Uri(coverUrl);
+                image.DecodePixelWidth = 440;
+                image.EndInit();
+
+                brushArt.ImageSource = image;
             }
             catch
             {

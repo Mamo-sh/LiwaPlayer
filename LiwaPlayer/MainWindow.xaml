@@ -128,8 +128,9 @@
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="24"/>
                                         <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="140"/>
+                                        <ColumnDefinition Width="130"/>
                                         <ColumnDefinition Width="58"/>
+                                        <ColumnDefinition Width="30"/>
                                         <ColumnDefinition Width="40"/>
                                     </Grid.ColumnDefinitions>
 
@@ -162,7 +163,17 @@
                                                FontSize="12"
                                                VerticalAlignment="Center"/>
 
-                                    <Border Grid.Column="4"
+                                    <Button x:Name="btnRowDownload"
+                                            Grid.Column="4"
+                                            Style="{StaticResource IconButton}"
+                                            Width="26" Height="26"
+                                            FontSize="12"
+                                            Content="&#xE896;"
+                                            ToolTip="MP3 olarak indir (Müzik\LiwaPlayer klasörüne)"
+                                            Visibility="Collapsed"
+                                            Click="btnDownloadSong_Click"/>
+
+                                    <Border Grid.Column="5"
                                             Background="{StaticResource Surface3Brush}"
                                             CornerRadius="4"
                                             Padding="5,2"
@@ -178,6 +189,13 @@
                                         <Setter TargetName="icoPlaying" Property="Visibility" Value="Visible"/>
                                         <Setter TargetName="txtTitle" Property="Foreground" Value="{StaticResource AccentBrush}"/>
                                         <Setter TargetName="txtTitle" Property="FontWeight" Value="SemiBold"/>
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding Source}" Value="YouTube">
+                                        <Setter TargetName="btnRowDownload" Property="Visibility" Value="Visible"/>
+                                    </DataTrigger>
+                                    <!-- Canlı yayın MP3 olarak indirilemez -->
+                                    <DataTrigger Binding="{Binding IsLive}" Value="True">
+                                        <Setter TargetName="btnRowDownload" Property="Visibility" Value="Collapsed"/>
                                     </DataTrigger>
                                 </DataTemplate.Triggers>
                             </DataTemplate>
@@ -298,7 +316,7 @@
                                         </Border>
                                         <Border CornerRadius="6">
                                             <Border.Background>
-                                                <ImageBrush ImageSource="{Binding ThumbnailUrl}"
+                                                <ImageBrush ImageSource="{Binding ThumbnailUrl, Converter={StaticResource ThumbConverter}}"
                                                             Stretch="UniformToFill"/>
                                             </Border.Background>
                                         </Border>

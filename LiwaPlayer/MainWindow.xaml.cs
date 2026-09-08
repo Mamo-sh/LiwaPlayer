@@ -49,6 +49,11 @@ namespace LiwaPlayer
         // Açık olan görselleştirici penceresi (kapaktan açılır)
         private VisualizerWindow? _visualizer;
 
+        // MP3 indirme kuyruğu (yt-dlp ile, sırayla işlenir)
+        private readonly DownloadService _downloader = new();
+        private readonly System.Collections.Generic.Queue<Song> _downloadQueue = new();
+        private bool _downloading;
+
         public MainWindow()
         {
             InitializeComponent();
@@ -431,6 +436,8 @@ namespace LiwaPlayer
 
                 _balloonShown = true;
             }
+
+            TrimMemory();
         }
 
         // ═══════════════ Aktif liste bağlama ═══════════════
@@ -510,15 +517,46 @@ namespace LiwaPlayer
         {
             try
             {
-                brushCover.ImageSource = string.IsNullOrWhiteSpace(url)
-                    ? null
-                    : new System.Windows.Media.Imaging.BitmapImage(new Uri(url));
+                if (string.IsNullOrWhiteSpace(url))
+                {
+                    brushCover.ImageSource = null;
+                    return;
+                }
+
+                // 40px'lik kutu için küçük çözünürlük yeterli (bellek tasarrufu)
+                var image = new System.Windows.Media.Imaging.BitmapImage();
+                image.BeginInit();
+                image.UriSource = new Uri(url);
+                image.DecodePixelWidth = 96;
+                image.EndInit();
+
+                brushCover.ImageSource = image;
             }
             catch
             {
                 brushCover.ImageSource = null;
             }
         }
+
+        // Tepsiye inince/pencereler kapanınca bellek işletim sistemine iade
+        // edilir; POS makinelerinde görünür RAM kullanımını düşük tutar
+        private static void TrimMemory()
+        {
+            try
+            {
+                GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+                GC.WaitForPendingFinalizers();
+                GC.Collect();
+
+                EmptyWorkingSet(System.Diagnostics.Process.GetCurrentProcess().Handle);
+            }
+            catch
+            {
+            }
+        }
+
+        [System.Runtime.InteropServices.DllImport("psapi.dll")]
+        private static extern bool EmptyWorkingSet(IntPtr hProcess);
 
         private void coverBox_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
         {
@@ -543,7 +581,11 @@ namespace LiwaPlayer
                 Owner = this
             };
 
-            _visualizer.Closed += (_, _) => _visualizer = null;
+            _visualizer.Closed += (_, _) =>
+            {
+                _visualizer = null;
+                TrimMemory();
+            };
 
             var song = _playlist.CurrentSong;
 
@@ -1100,6 +1142,68 @@ namespace LiwaPlayer
             }
 
             SetStatus($"\"{song.Title}\" → \"{target.Name}\" listesine taşındı.");
+        }
+
+        // ═══════════════ MP3 indirme ═══════════════
+
+        private void btnDownloadSong_Click(object sender, RoutedEventArgs e)
+        {
+            if ((sender as FrameworkElement)?.DataContext is not Song song)
+                return;
+
+            if (song.Source != SongSource.YouTube || song.IsLive)
+                return;
+
+            if (_downloadQueue.Contains(song))
+            {
+                SetStatus("Bu şarkı zaten indirme kuyruğunda.");
+                return;
+            }
+
+            _downloadQueue.Enqueue(song);
+
+            SetStatus(_downloading
+                ? $"Kuyruğa eklendi ({_downloadQueue.Count} bekliyor): {song.Title}"
+                : $"İndirme başlıyor: {song.Title}");
+
+            _ = ProcessDownloadQueueAsync();
+        }
+
+        private async System.Threading.Tasks.Task ProcessDownloadQueueAsync()
+        {
+            if (_downloading)
+                return;
+
+            _downloading = true;
+
+            try
+            {
+                // yt-dlp + ffmpeg ilk kullanımda otomatik kurulur
+                if (!_downloader.ToolsReady)
+                    await _downloader.EnsureToolsAsync(new Progress<string>(SetStatus));
+
+                while (_downloadQueue.Count > 0)
+                {
+                    var song = _downloadQueue.Dequeue();
+
+                    bool ok = await _downloader.DownloadMp3Async(song.FileName,
+                        new Progress<int>(p => SetStatus($"⬇ {song.Title} — %{p}")));
+
+                    SetStatus(ok
+                        ? $"✔ İndirildi: {song.Title}  (Müzik\\LiwaPlayer)"
+                        : $"İndirilemedi: {song.Title}");
+                }
+            }
+            catch (Exception ex)
+            {
+                LogService.Write("MP3 indirme", ex);
+                SetStatus("İndirme hatası: " + ex.Message);
+                _downloadQueue.Clear();
+            }
+            finally
+            {
+                _downloading = false;
+            }
         }
 
         private void btnDelete_Click(object sender, RoutedEventArgs e) => RemoveSelectedSong();
