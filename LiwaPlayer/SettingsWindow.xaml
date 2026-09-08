@@ -1,4 +1,4 @@
-<Window x:Class="LiwaPlayer.SettingsWindow"
+﻿<Window x:Class="LiwaPlayer.SettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Optimizasyon Ayarları"
@@ -6,7 +6,7 @@
         Width="480"
         MinHeight="480"
         MinWidth="420"
-        Background="{StaticResource BgBrush}"
+        Background="{DynamicResource BgBrush}"
         FontFamily="Segoe UI"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False">
@@ -19,6 +19,28 @@
 
         <ScrollViewer VerticalScrollBarVisibility="Auto">
             <StackPanel>
+
+                <!-- ═══ Görünüm ═══ -->
+                <TextBlock Text="🎨 Görünüm"
+                           Style="{StaticResource PanelTitle}"
+                           Margin="0,0,0,10"/>
+
+                <TextBlock Text="Tema"
+                           Foreground="{DynamicResource TextBrush}"
+                           FontSize="13"
+                           Margin="0,0,0,6"/>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                    <RadioButton x:Name="rbThemeAuto" Style="{StaticResource TabButton}" Content="Otomatik (saate göre)" GroupName="theme" Checked="ThemeRadio_Checked"/>
+                    <RadioButton x:Name="rbThemeLight" Style="{StaticResource TabButton}" Content="Açık" GroupName="theme" Margin="4,0,0,0" Checked="ThemeRadio_Checked"/>
+                    <RadioButton x:Name="rbThemeDark" Style="{StaticResource TabButton}" Content="Koyu" GroupName="theme" Margin="4,0,0,0" Checked="ThemeRadio_Checked"/>
+                </StackPanel>
+                <TextBlock Text="Otomatik modda 08:00-20:00 arası açık, gerisi koyu tema kullanılır. Seçim anında uygulanır."
+                           Style="{StaticResource MutedText}"
+                           FontSize="11"
+                           TextWrapping="Wrap"
+                           Margin="0,0,0,16"/>
+
+                <Border Height="1" Background="{DynamicResource LineBrush}" Margin="0,0,0,14"/>
 
                 <!-- ═══ Performans ═══ -->
                 <TextBlock Text="⚡ Performans"
@@ -56,7 +78,7 @@
                            Margin="27,0,0,12"/>
 
                 <TextBlock Text="Arama sonucu sayısı"
-                           Foreground="{StaticResource TextBrush}"
+                           Foreground="{DynamicResource TextBrush}"
                            FontSize="13"
                            Margin="0,0,0,6"/>
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
@@ -70,7 +92,7 @@
                 </StackPanel>
 
                 <TextBlock Text="Ağ önbelleği (takılma/kesilme olursa yükseltin)"
-                           Foreground="{StaticResource TextBrush}"
+                           Foreground="{DynamicResource TextBrush}"
                            FontSize="13"
                            Margin="0,0,0,6"/>
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
@@ -79,7 +101,7 @@
                     <RadioButton x:Name="rbCacheHigh" Style="{StaticResource TabButton}" Content="Yüksek (8 sn)" GroupName="cache" Margin="4,0,0,0"/>
                 </StackPanel>
 
-                <Border Height="1" Background="{StaticResource LineBrush}" Margin="0,0,0,14"/>
+                <Border Height="1" Background="{DynamicResource LineBrush}" Margin="0,0,0,14"/>
 
                 <!-- ═══ Oynatma ═══ -->
                 <TextBlock Text="🎵 Oynatma"
@@ -96,7 +118,7 @@
                            TextWrapping="Wrap"
                            Margin="27,0,0,16"/>
 
-                <Border Height="1" Background="{StaticResource LineBrush}" Margin="0,0,0,14"/>
+                <Border Height="1" Background="{DynamicResource LineBrush}" Margin="0,0,0,14"/>
 
                 <!-- ═══ Genel ═══ -->
                 <TextBlock Text="⚙ Genel"

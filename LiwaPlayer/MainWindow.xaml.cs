@@ -6,9 +6,12 @@ using System.Collections.ObjectModel;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Threading;
 using WinForms = System.Windows.Forms;
 
@@ -58,9 +61,21 @@ namespace LiwaPlayer
         private const long MemoryLimitBytes = 100 * 1024 * 1024;
         private readonly DispatcherTimer _memoryGuard = new() { Interval = TimeSpan.FromSeconds(15) };
 
+        // Otomatik tema modunda gündüz/gece geçişini yakalamak için periyodik denetim
+        private readonly DispatcherTimer _themeTimer = new() { Interval = TimeSpan.FromMinutes(10) };
+
+        // Pencere başlığında ve üst çubukta gösterilen sabit sürüm etiketi
+        private readonly string _baseTitle = "LiwaPlayer v" + UpdateService.CurrentVersion.ToString(3);
+
+        // Hesap girişi sonrası en iyi çaba ile çekilir (avatar, Premium durumu)
+        private bool _isPremiumAccount;
+
         public MainWindow()
         {
             InitializeComponent();
+
+            Title = _baseTitle;
+            txtAppVersion.Text = _baseTitle;
 
             InitTray();
 
@@ -70,11 +85,22 @@ namespace LiwaPlayer
 
             ApplySettings();
 
+            _themeTimer.Tick += (_, _) =>
+            {
+                if (_settings.Current.Theme == ThemeMode.Auto)
+                    ThemeService.Apply(ThemeMode.Auto);
+            };
+            _themeTimer.Start();
+
             // Kayıtlı oturum varsa kimlik doğrulamalı istemciyle başla
             if (_auth.IsLoggedIn)
             {
                 _youtube.SetAuthCookies(_auth.Cookies);
                 UpdateAccountButton();
+
+                // Avatar/Premium bilgisi ve Beğenilen/Daha Sonra İzle listeleri
+                // arka planda çekilir; açılışı bekletmez
+                _ = OnLoggedInAsync();
             }
 
             _player.PlaybackEnded += (_, _) =>
@@ -124,6 +150,7 @@ namespace LiwaPlayer
 
             _player.NetworkCachingMs = Math.Clamp(s.NetworkCachingMs, 500, 15000);
             YouTubeService.LoadThumbnails = s.ShowThumbnails;
+            ThemeService.Apply(s.Theme);
         }
 
         private void btnSettings_Click(object sender, RoutedEventArgs e)
@@ -139,12 +166,28 @@ namespace LiwaPlayer
 
         // ═══════════════ Öneriler ═══════════════
 
-        // Kitaplıktaki sanatçılardan rastgele seçip YouTube Music'te aratır;
-        // zaten listelerde olan şarkılar önerilmez. Kitaplık boşsa genel liste gelir.
-        private async System.Threading.Tasks.Task LoadRecommendationsAsync()
+        // Girişliyse önce abone olunan kanalların videoları (ağırlıklı gösterim),
+        // sonra kitaplıktaki sanatçılardan rastgele seçilenler eklenir. Abonelik
+        // akışı alınamazsa (giriş yok veya en-iyi-çaba uç noktası başarısız)
+        // sessizce sadece kitaplık tabanlı önerilere düşülür.
+        private async Task LoadRecommendationsAsync()
         {
             try
             {
+                var subsPool = new System.Collections.Generic.List<YouTubeSearchResult>();
+
+                if (_auth.IsLoggedIn)
+                {
+                    try
+                    {
+                        subsPool = await _youtube.FetchSubscriptionVideosAsync(_auth.Cookies, 16);
+                    }
+                    catch
+                    {
+                        // Abonelik akışı başarısız: kitaplık tabanlı önerilerle devam
+                    }
+                }
+
                 var allSongs = _playlist.Playlists.SelectMany(p => p.Songs).ToList();
 
                 var seeds = allSongs
@@ -152,14 +195,14 @@ namespace LiwaPlayer
                     .Where(a => !string.IsNullOrWhiteSpace(a))
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .OrderBy(_ => _random.Next())
-                    .Take(3)
+                    .Take(subsPool.Count > 0 ? 2 : 3)
                     .ToList();
 
-                var pool = new System.Collections.Generic.List<YouTubeSearchResult>();
+                var libraryPool = new System.Collections.Generic.List<YouTubeSearchResult>();
 
-                if (seeds.Count == 0)
+                if (seeds.Count == 0 && subsPool.Count == 0)
                 {
-                    pool.AddRange(await _youtube.SearchMusicAsync("en çok dinlenen şarkılar", 20));
+                    libraryPool.AddRange(await _youtube.SearchMusicAsync("en çok dinlenen şarkılar", 20));
                 }
                 else
                 {
@@ -167,7 +210,7 @@ namespace LiwaPlayer
                     {
                         try
                         {
-                            pool.AddRange(await _youtube.SearchMusicAsync(seed, 8));
+                            libraryPool.AddRange(await _youtube.SearchMusicAsync(seed, subsPool.Count > 0 ? 5 : 8));
                         }
                         catch
                         {
@@ -181,11 +224,13 @@ namespace LiwaPlayer
                     .Select(s => s.FileName)
                     .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-                var recommendations = pool
+                // Abonelik videoları YouTube'un kendi alaka sırasıyla önce gelir
+                // (ağırlıklı gösterim); kitaplık tabanlı dolgu karıştırılıp sona eklenir
+                var recommendations = subsPool
+                    .Concat(libraryPool.OrderBy(_ => _random.Next()))
                     .GroupBy(r => r.VideoId)
                     .Select(g => g.First())
                     .Where(r => !known.Contains(r.VideoId))
-                    .OrderBy(_ => _random.Next())
                     .Take(20)
                     .ToList();
 
@@ -197,6 +242,9 @@ namespace LiwaPlayer
                     return;
 
                 lstResults.ItemsSource = recommendations;
+                txtRecoTitle.Text = subsPool.Count > 0
+                    ? "✨ Abone olduğun kanallardan ve sana özel öneriler"
+                    : "✨ Sana özel öneriler";
                 txtRecoTitle.Visibility = Visibility.Visible;
                 txtSearchHint.Visibility = Visibility.Collapsed;
             }
@@ -583,7 +631,7 @@ namespace LiwaPlayer
             }
         }
 
-        private void coverBox_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+        private void coverBox_Click(object sender, RoutedEventArgs e)
         {
             if (_settings.Current.DisableVisualizer)
             {
@@ -750,7 +798,7 @@ namespace LiwaPlayer
             }
 
             txtSong.Text = FormatSongLabel(song);
-            Title = "LiwaPlayer — " + song.Title;
+            Title = $"{_baseTitle} — {song.Title}";
 
             SetCoverImage(song.CoverImage);
             _visualizer?.UpdateSong(song.Title, song.Artist, song.CoverImage);
@@ -758,7 +806,7 @@ namespace LiwaPlayer
             if (_tray != null)
             {
                 // NotifyIcon.Text en fazla 63 karakter kabul eder
-                var trayText = "LiwaPlayer — " + song.Title;
+                var trayText = _baseTitle + " — " + song.Title;
                 _tray.Text = trayText.Length > 63 ? trayText[..60] + "..." : trayText;
             }
 
@@ -1019,6 +1067,17 @@ namespace LiwaPlayer
 
             if (txtVolume != null)
                 txtVolume.Text = "%" + volume;
+        }
+
+        // Fare imleci ses çubuğunun üzerindeyken tekerlekle ses ayarlanır
+        private void sliderVolume_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+        {
+            sliderVolume.Value = Math.Clamp(
+                sliderVolume.Value + (e.Delta > 0 ? 5 : -5),
+                sliderVolume.Minimum,
+                sliderVolume.Maximum);
+
+            e.Handled = true;
         }
 
         // ═══════════════ Playlist işlemleri ═══════════════
@@ -1293,13 +1352,119 @@ namespace LiwaPlayer
         {
             if (_auth.IsLoggedIn)
             {
-                btnAccount.Foreground = (System.Windows.Media.Brush)FindResource("AccentBrush");
-                btnAccount.ToolTip = "YouTube oturumu açık — çıkış yapmak için tıkla";
+                iconAccountDefault.SetResourceReference(TextBlock.ForegroundProperty, "AccentBrush");
+                avatarBox.ToolTip = "YouTube oturumu açık — çıkış yapmak için tıkla";
+                AutomationProperties.SetName(avatarBox, "YouTube hesabı: giriş yapılmış, çıkış için tıkla");
             }
             else
             {
-                btnAccount.ClearValue(ForegroundProperty);
-                btnAccount.ToolTip = "YouTube hesabıyla giriş yap (Premium: reklamsız + kendi listelerin)";
+                iconAccountDefault.SetResourceReference(TextBlock.ForegroundProperty, "MutedBrush");
+                avatarImageHost.Visibility = Visibility.Collapsed;
+                brushAvatar.ImageSource = null;
+                premiumBadge.Visibility = Visibility.Collapsed;
+                _isPremiumAccount = false;
+
+                avatarBox.ToolTip = "YouTube hesabıyla giriş yap (Premium: reklamsız + kendi listelerin)";
+                AutomationProperties.SetName(avatarBox, "YouTube hesabı: giriş yapılmadı");
+            }
+        }
+
+        // Avatar/Premium bilgisi belgelenmemiş bir uç noktadan en iyi çabayla
+        // çekilir; başarısız olursa (info == null) mevcut varsayılan görünüm korunur
+        private void ApplyAccountInfo(YouTubeAccountInfo? info)
+        {
+            if (info == null)
+                return;
+
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(info.AvatarUrl))
+                {
+                    var image = new System.Windows.Media.Imaging.BitmapImage();
+                    image.BeginInit();
+                    image.UriSource = new Uri(info.AvatarUrl);
+                    image.DecodePixelWidth = 60;
+                    image.EndInit();
+
+                    brushAvatar.ImageSource = image;
+                    avatarImageHost.Visibility = Visibility.Visible;
+                }
+            }
+            catch
+            {
+                // Avatar indirilemezse hesap simgesi (aksan renkli) görünümde kalır
+            }
+
+            _isPremiumAccount = info.IsPremium;
+            premiumBadge.Visibility = info.IsPremium ? Visibility.Visible : Visibility.Collapsed;
+
+            var nameSuffix = string.IsNullOrWhiteSpace(info.ChannelName) ? "" : $" ({info.ChannelName})";
+            avatarBox.ToolTip = $"YouTube oturumu açık{nameSuffix} — çıkış yapmak için tıkla";
+            AutomationProperties.SetName(avatarBox,
+                $"YouTube hesabı{nameSuffix}: giriş yapılmış, çıkış için tıkla");
+        }
+
+        // Girişten sonra (hem yeni giriş hem açılışta hatırlanan oturum için)
+        // avatar/Premium bilgisi ve Beğenilen/Daha Sonra İzle listeleri çekilir
+        private async Task OnLoggedInAsync()
+        {
+            var info = await _youtube.FetchAccountInfoAsync(_auth.Cookies);
+            ApplyAccountInfo(info);
+
+            await ImportSpecialPlaylistsAsync();
+        }
+
+        private async Task ImportSpecialPlaylistsAsync()
+        {
+            if (!_auth.IsLoggedIn)
+                return;
+
+            await ImportSpecialPlaylistAsync("Beğenilen Videolar", "LL");
+            await ImportSpecialPlaylistAsync("Daha Sonra İzle", "WL");
+        }
+
+        // "LL" (Beğenilen Videolar) ve "WL" (Daha Sonra İzle) YouTube'un özel
+        // liste kimlikleridir; hesap girişiyle çekilip yerel bir listeye
+        // dönüştürülür. Liste zaten varsa sadece yeni şarkılar eklenir (dedup).
+        private async Task ImportSpecialPlaylistAsync(string name, string listId)
+        {
+            try
+            {
+                var (_, videos) = await _youtube.GetPlaylistAsync(
+                    $"https://www.youtube.com/playlist?list={listId}");
+
+                if (videos.Count == 0)
+                    return;
+
+                var target = _playlist.Playlists.FirstOrDefault(p =>
+                    string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase))
+                    ?? _playlist.CreatePlaylist(name);
+
+                int added = 0;
+
+                foreach (var video in videos)
+                {
+                    _playlist.Add(new Song
+                    {
+                        FileName = video.VideoId,
+                        Title = video.Title,
+                        Artist = video.Author,
+                        Duration = video.Duration,
+                        Source = SongSource.YouTube,
+                        CoverImage = video.ThumbnailUrl
+                    }, target, out bool wasAdded);
+
+                    if (wasAdded)
+                        added++;
+                }
+
+                if (added > 0)
+                    SetStatus($"\"{name}\" listesi güncellendi (+{added} şarkı).");
+            }
+            catch (Exception ex)
+            {
+                LogService.Write($"Özel liste içe aktarma ({listId})", ex);
+                // Bu otomatik bir arka plan işlemi; kullanıcıyı hata ile rahatsız etme
             }
         }
 
@@ -1333,6 +1498,8 @@ namespace LiwaPlayer
 
                 UpdateAccountButton();
                 SetStatus("YouTube girişi yapıldı. Premium hesapta akışlar reklamsızdır.");
+
+                _ = OnLoggedInAsync();
             }
         }
 

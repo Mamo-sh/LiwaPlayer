@@ -37,9 +37,15 @@ namespace LiwaPlayer
             // (pencere oluşmadan önce, süreç genelinde uygulanmalı)
             try
             {
-                if (new Services.SettingsService().Current.SoftwareRendering)
+                var settings = new Services.SettingsService();
+
+                if (settings.Current.SoftwareRendering)
                     System.Windows.Media.RenderOptions.ProcessRenderMode =
                         System.Windows.Interop.RenderMode.SoftwareOnly;
+
+                // Tema, pencere oluşmadan önce uygulanır ki açılışta yanlış
+                // renklerle bir an görünüp sonra değişmesin
+                Services.ThemeService.Apply(settings.Current.Theme);
             }
             catch
             {

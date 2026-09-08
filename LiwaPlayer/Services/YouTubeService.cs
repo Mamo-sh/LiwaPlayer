@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -32,6 +33,17 @@ namespace LiwaPlayer.Services
                 : Duration.TotalHours >= 1
                     ? Duration.ToString(@"h\:mm\:ss")
                     : Duration.ToString(@"mm\:ss");
+    }
+
+    public class YouTubeAccountInfo
+    {
+        public string ChannelName { get; set; } = "";
+
+        public string AvatarUrl { get; set; } = "";
+
+        // Best-effort: YouTube'un belgelenmemiş hesap menüsü yanıtından
+        // ayrıştırılır. Kesin garanti değildir; yanlış sonuç verebilir.
+        public bool IsPremium { get; set; }
     }
 
     public class YouTubeService
@@ -125,12 +137,15 @@ namespace LiwaPlayer.Services
             var results = new List<YouTubeSearchResult>();
 
             using var doc = JsonDocument.Parse(json);
-            WalkLiveResults(doc.RootElement, results, maxResults);
+            WalkVideoRendererResults(doc.RootElement, results, maxResults, isLive: true);
 
             return results;
         }
 
-        private static void WalkLiveResults(JsonElement element, List<YouTubeSearchResult> results, int max)
+        // videoRenderer düğümlerini toplar; hem canlı arama hem abonelik akışı
+        // aynı düğüm şeklini kullanır, isLive sadece etiketleme için verilir
+        private static void WalkVideoRendererResults(
+            JsonElement element, List<YouTubeSearchResult> results, int max, bool isLive)
         {
             if (results.Count >= max)
                 return;
@@ -143,7 +158,7 @@ namespace LiwaPlayer.Services
                     var result = new YouTubeSearchResult
                     {
                         VideoId = id.GetString() ?? "",
-                        IsLive = true
+                        IsLive = isLive
                     };
 
                     if (video.TryGetProperty("title", out var t) &&
@@ -170,12 +185,12 @@ namespace LiwaPlayer.Services
                 }
 
                 foreach (var property in element.EnumerateObject())
-                    WalkLiveResults(property.Value, results, max);
+                    WalkVideoRendererResults(property.Value, results, max, isLive);
             }
             else if (element.ValueKind == JsonValueKind.Array)
             {
                 foreach (var child in element.EnumerateArray())
-                    WalkLiveResults(child, results, max);
+                    WalkVideoRendererResults(child, results, max, isLive);
             }
         }
 
@@ -388,6 +403,188 @@ namespace LiwaPlayer.Services
                         .Select(t => (t.Url, t.Resolution.Width))
                         .ToList())
                 };
+            }
+        }
+
+        // ═══════════ Hesap bilgisi (avatar, Premium — en iyi çaba) ═══════════
+
+        // Google'ın kendi web istemcisinin kimlik doğrulamalı isteklerde
+        // kullandığı imza yöntemi: SHA1(zaman SAPISID origin). Belgelenmemiş
+        // ama yaygın bilinen bir tekniktir (cookie'nin ötesinde ek doğrulama ister).
+        private static string BuildSapisidHash(string sapisid, string origin)
+        {
+            long timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            string raw = $"{timestamp} {sapisid} {origin}";
+
+            var hash = SHA1.HashData(Encoding.UTF8.GetBytes(raw));
+            string hex = Convert.ToHexString(hash).ToLowerInvariant();
+
+            return $"SAPISIDHASH {timestamp}_{hex}";
+        }
+
+        private static HttpRequestMessage BuildAuthenticatedRequest(
+            string url, string body, IReadOnlyList<Cookie> cookies)
+        {
+            var sapisid = cookies.FirstOrDefault(c => c.Name == "SAPISID")?.Value
+                ?? cookies.FirstOrDefault(c => c.Name == "__Secure-3PAPISID")?.Value
+                ?? throw new InvalidOperationException("SAPISID çerezi bulunamadı.");
+
+            var request = new HttpRequestMessage(HttpMethod.Post, url)
+            {
+                Content = new StringContent(body, Encoding.UTF8, "application/json")
+            };
+
+            request.Headers.Add("Cookie", string.Join("; ", cookies.Select(c => $"{c.Name}={c.Value}")));
+            request.Headers.Add("Authorization", BuildSapisidHash(sapisid, "https://www.youtube.com"));
+            request.Headers.Add("X-Origin", "https://www.youtube.com");
+            request.Headers.Add("X-Goog-AuthUser", "0");
+
+            return request;
+        }
+
+        // Profil fotoğrafı, kanal adı ve Premium durumunu YouTube'un hesap
+        // menüsü uç noktasından çeker. Bu uç nokta belgelenmemiştir; YouTube
+        // yapıyı değiştirirse tespit bozulabilir — böyle bir durumda null döner,
+        // uygulama sessizce varsayılan (giriş simgesi) görünüme düşer.
+        public async Task<YouTubeAccountInfo?> FetchAccountInfoAsync(IReadOnlyList<Cookie>? cookies)
+        {
+            if (cookies == null || cookies.Count == 0)
+                return null;
+
+            try
+            {
+                var body = JsonSerializer.Serialize(new
+                {
+                    context = new
+                    {
+                        client = new
+                        {
+                            clientName = "WEB",
+                            clientVersion = "2.20250312.04.00",
+                            hl = "tr",
+                            gl = "TR"
+                        }
+                    }
+                });
+
+                using var request = BuildAuthenticatedRequest(
+                    "https://www.youtube.com/youtubei/v1/account/account_menu?prettyPrint=false",
+                    body, cookies);
+
+                using var response = await Http.SendAsync(request);
+
+                if (!response.IsSuccessStatusCode)
+                    return null;
+
+                var json = await response.Content.ReadAsStringAsync();
+
+                using var doc = JsonDocument.Parse(json);
+
+                var info = new YouTubeAccountInfo();
+                WalkAccountMenu(doc.RootElement, info);
+
+                return string.IsNullOrEmpty(info.AvatarUrl) ? null : info;
+            }
+            catch (Exception ex)
+            {
+                LogService.Write("Hesap bilgisi alınamadı (en iyi çaba)", ex);
+                return null;
+            }
+        }
+
+        private static void WalkAccountMenu(JsonElement element, YouTubeAccountInfo info)
+        {
+            if (element.ValueKind == JsonValueKind.Object)
+            {
+                if (element.TryGetProperty("accountName", out var name) &&
+                    name.TryGetProperty("simpleText", out var nameText))
+                    info.ChannelName = nameText.GetString() ?? info.ChannelName;
+
+                if (element.TryGetProperty("accountPhoto", out var photo) &&
+                    photo.TryGetProperty("thumbnails", out var thumbs))
+                {
+                    var best = thumbs.EnumerateArray()
+                        .Select(t => (
+                            Url: t.TryGetProperty("url", out var u) ? u.GetString() ?? "" : "",
+                            Width: t.TryGetProperty("width", out var w) ? w.GetInt32() : 0))
+                        .Where(t => t.Url.Length > 0)
+                        .OrderByDescending(t => t.Width)
+                        .FirstOrDefault();
+
+                    if (!string.IsNullOrEmpty(best.Url))
+                        info.AvatarUrl = best.Url;
+                }
+
+                foreach (var property in element.EnumerateObject())
+                {
+                    // "YouTube Premium" tek başına bir metin değeri olarak
+                    // (uzun bir tanıtım cümlesinin parçası değil) Premium
+                    // üyelerin hesap menüsünde rozet/bölüm başlığı olarak geçer
+                    if (property.Value.ValueKind == JsonValueKind.String &&
+                        string.Equals(property.Value.GetString()?.Trim(), "YouTube Premium",
+                            StringComparison.OrdinalIgnoreCase))
+                        info.IsPremium = true;
+
+                    WalkAccountMenu(property.Value, info);
+                }
+            }
+            else if (element.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var child in element.EnumerateArray())
+                    WalkAccountMenu(child, info);
+            }
+        }
+
+        // ═══════════ Abonelik akışı (öneriler için — en iyi çaba) ═══════════
+
+        // Abone olunan kanalların son videolarını YouTube'un "Abonelikler"
+        // besleme sayfasından çeker. Belgelenmemiş bir uç nokta kullanır;
+        // başarısız olursa boş liste döner ve öneriler kitaplık tabanlı kalır.
+        public async Task<List<YouTubeSearchResult>> FetchSubscriptionVideosAsync(
+            IReadOnlyList<Cookie>? cookies, int maxResults = 20)
+        {
+            if (cookies == null || cookies.Count == 0)
+                return new List<YouTubeSearchResult>();
+
+            try
+            {
+                var body = JsonSerializer.Serialize(new
+                {
+                    context = new
+                    {
+                        client = new
+                        {
+                            clientName = "WEB",
+                            clientVersion = "2.20250312.04.00",
+                            hl = "tr",
+                            gl = "TR"
+                        }
+                    },
+                    browseId = "FEsubscriptions"
+                });
+
+                using var request = BuildAuthenticatedRequest(
+                    "https://www.youtube.com/youtubei/v1/browse?prettyPrint=false",
+                    body, cookies);
+
+                using var response = await Http.SendAsync(request);
+
+                if (!response.IsSuccessStatusCode)
+                    return new List<YouTubeSearchResult>();
+
+                var json = await response.Content.ReadAsStringAsync();
+
+                var results = new List<YouTubeSearchResult>();
+
+                using var doc = JsonDocument.Parse(json);
+                WalkVideoRendererResults(doc.RootElement, results, maxResults, isLive: false);
+
+                return results;
+            }
+            catch (Exception ex)
+            {
+                LogService.Write("Abonelik akışı alınamadı (en iyi çaba)", ex);
+                return new List<YouTubeSearchResult>();
             }
         }
 

@@ -1,7 +1,16 @@
 namespace LiwaPlayer.Models
 {
+    public enum ThemeMode
+    {
+        Auto = 0,
+        Light = 1,
+        Dark = 2
+    }
+
     public class Settings
     {
+        // Otomatik: saate göre (08:00-20:00 açık, gerisi koyu)
+        public ThemeMode Theme { get; set; } = ThemeMode.Auto;
         public int Volume { get; set; } = 80;
 
         public bool Shuffle { get; set; } = false;

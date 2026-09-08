@@ -1,11 +1,11 @@
-<Window x:Class="LiwaPlayer.LoginWindow"
+﻿<Window x:Class="LiwaPlayer.LoginWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
         Title="YouTube Hesabıyla Giriş"
         Height="680"
         Width="520"
-        Background="{StaticResource BgBrush}"
+        Background="{DynamicResource BgBrush}"
         FontFamily="Segoe UI"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False">
@@ -16,9 +16,9 @@
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
-        <Border Background="{StaticResource SurfaceBrush}" Padding="14,10">
+        <Border Background="{DynamicResource SurfaceBrush}" Padding="14,10">
             <TextBlock Text="Google hesabınla giriş yap. Giriş tamamlanınca pencere kendiliğinden kapanır."
-                       Foreground="{StaticResource MutedBrush}"
+                       Foreground="{DynamicResource MutedBrush}"
                        FontSize="12"
                        TextWrapping="Wrap"/>
         </Border>
@@ -28,7 +28,7 @@
         <TextBlock x:Name="txtLoading"
                    Grid.Row="1"
                    Text="Yükleniyor..."
-                   Foreground="{StaticResource MutedBrush}"
+                   Foreground="{DynamicResource MutedBrush}"
                    HorizontalAlignment="Center"
                    VerticalAlignment="Center"/>
     </Grid>

@@ -1,4 +1,4 @@
-<Window x:Class="LiwaPlayer.PlaylistManagerWindow"
+﻿<Window x:Class="LiwaPlayer.PlaylistManagerWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Kayıtlı Listeler"
@@ -6,7 +6,7 @@
         Width="470"
         MinHeight="380"
         MinWidth="400"
-        Background="{StaticResource BgBrush}"
+        Background="{DynamicResource BgBrush}"
         FontFamily="Segoe UI"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False">
@@ -68,17 +68,17 @@
                                     <TextBlock Text="{Binding Name}"
                                                FontSize="13"
                                                FontWeight="SemiBold"
-                                               Foreground="{StaticResource TextBrush}"
+                                               Foreground="{DynamicResource TextBrush}"
                                                TextTrimming="CharacterEllipsis"
                                                MaxWidth="220"/>
                                     <TextBlock x:Name="tbActive"
                                                Text="  •  şu an açık"
                                                FontSize="11"
-                                               Foreground="{StaticResource AccentBrush}"
+                                               Foreground="{DynamicResource AccentBrush}"
                                                VerticalAlignment="Center"
                                                Visibility="Collapsed"/>
                                 </StackPanel>
-                                <TextBlock Foreground="{StaticResource MutedBrush}"
+                                <TextBlock Foreground="{DynamicResource MutedBrush}"
                                            FontSize="11"
                                            Margin="0,2,0,0">
                                     <Run Text="{Binding Songs.Count, Mode=OneWay}"/><Run Text=" şarkı"/>

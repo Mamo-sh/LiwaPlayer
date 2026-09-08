@@ -1,4 +1,4 @@
-<Window x:Class="LiwaPlayer.SpotifyImportWindow"
+﻿<Window x:Class="LiwaPlayer.SpotifyImportWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Spotify Listesi İçe Aktar"
@@ -6,7 +6,7 @@
         Width="520"
         MinHeight="420"
         MinWidth="440"
-        Background="{StaticResource BgBrush}"
+        Background="{DynamicResource BgBrush}"
         FontFamily="Segoe UI"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False"
@@ -74,7 +74,7 @@
                     <DataTemplate>
                         <TextBlock Text="{Binding}"
                                    FontSize="12"
-                                   Foreground="{StaticResource MutedBrush}"
+                                   Foreground="{DynamicResource MutedBrush}"
                                    TextTrimming="CharacterEllipsis"/>
                     </DataTemplate>
                 </ListView.ItemTemplate>
