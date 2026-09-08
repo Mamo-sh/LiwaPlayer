@@ -37,9 +37,13 @@ namespace LiwaPlayer
         private readonly double[] _targets = new double[BarCount];
 
         // 0 = klip (video), 1 = alt çubuklar, 2 = ayna, 3 = halka
-        private int _mode;
+        private int _mode = 1;
         private bool _videoActive;
         private bool _switching;
+
+        // Son seçilen stil oturum boyunca hatırlanır; pencere yeniden
+        // açıldığında kullanıcının tercihiyle başlar
+        private static int _lastMode = 1;
 
         private WindowState _restoreState;
         private WindowStyle _restoreStyle;
@@ -77,8 +81,15 @@ namespace LiwaPlayer
             _timer.Tick += Timer_Tick;
             _timer.Start();
 
-            // Klipli şarkıysa video ile başla; değilse ışık stiline düş
-            Loaded += async (_, _) => await TryEnterVideoModeAsync(fallbackMode: 1);
+            // Işık stiliyle açılır; klip, tıklama döngüsündeki seçeneklerden biridir.
+            // Son seçilen stil (klip dahil) hatırlanır.
+            Loaded += async (_, _) =>
+            {
+                if (_lastMode == 0)
+                    await TryEnterVideoModeAsync(fallbackMode: 1);
+                else
+                    _mode = _lastMode;
+            };
 
             Closed += (_, _) => _timer.Stop();
         }
@@ -138,6 +149,7 @@ namespace LiwaPlayer
                 if (ok)
                 {
                     _mode = 0;
+                    _lastMode = 0;
                     _videoActive = true;
 
                     canvas.Visibility = Visibility.Collapsed;
@@ -148,6 +160,7 @@ namespace LiwaPlayer
                     videoView.Visibility = Visibility.Collapsed;
 
                     _mode = fallbackMode;
+                    _lastMode = fallbackMode;
                     _videoActive = false;
 
                     canvas.Visibility = Visibility.Visible;
@@ -180,6 +193,7 @@ namespace LiwaPlayer
                 infoPanel.Visibility = Visibility.Visible;
 
                 _mode = newMode;
+                _lastMode = newMode;
                 _videoActive = false;
 
                 await _switchToAudio();
@@ -340,6 +354,7 @@ namespace LiwaPlayer
             else
             {
                 _mode++;
+                _lastMode = _mode;
             }
 
             Render();
