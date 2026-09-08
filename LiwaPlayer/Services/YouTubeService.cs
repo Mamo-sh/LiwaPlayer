@@ -24,10 +24,14 @@ namespace LiwaPlayer.Services
 
         public string ThumbnailUrl { get; set; } = "";
 
+        public bool IsLive { get; set; }
+
         public string DurationText =>
-            Duration.TotalHours >= 1
-                ? Duration.ToString(@"h\:mm\:ss")
-                : Duration.ToString(@"mm\:ss");
+            IsLive
+                ? "🔴 CANLI"
+                : Duration.TotalHours >= 1
+                    ? Duration.ToString(@"h\:mm\:ss")
+                    : Duration.ToString(@"mm\:ss");
     }
 
     public class YouTubeService
@@ -85,6 +89,94 @@ namespace LiwaPlayer.Services
             }
 
             return results;
+        }
+
+        // ═══════════ Canlı yayın araması (radyo kanalları) ═══════════
+
+        // InnerTube WEB istemcisiyle "canlı" filtreli arama: yalnızca o an
+        // yayında olan kanallar döner (7/24 radyo kanalları dahil)
+        public async Task<List<YouTubeSearchResult>> SearchLiveAsync(string query, int maxResults = 20)
+        {
+            var body = JsonSerializer.Serialize(new
+            {
+                context = new
+                {
+                    client = new
+                    {
+                        clientName = "WEB",
+                        clientVersion = "2.20250312.04.00",
+                        hl = "tr",
+                        gl = "TR"
+                    }
+                },
+                query,
+                // "Canlı" filtresi
+                @params = "EgJAAQ%3D%3D"
+            });
+
+            var response = await Http.PostAsync(
+                "https://www.youtube.com/youtubei/v1/search?prettyPrint=false",
+                new StringContent(body, Encoding.UTF8, "application/json"));
+
+            response.EnsureSuccessStatusCode();
+
+            var json = await response.Content.ReadAsStringAsync();
+
+            var results = new List<YouTubeSearchResult>();
+
+            using var doc = JsonDocument.Parse(json);
+            WalkLiveResults(doc.RootElement, results, maxResults);
+
+            return results;
+        }
+
+        private static void WalkLiveResults(JsonElement element, List<YouTubeSearchResult> results, int max)
+        {
+            if (results.Count >= max)
+                return;
+
+            if (element.ValueKind == JsonValueKind.Object)
+            {
+                if (element.TryGetProperty("videoRenderer", out var video) &&
+                    video.TryGetProperty("videoId", out var id))
+                {
+                    var result = new YouTubeSearchResult
+                    {
+                        VideoId = id.GetString() ?? "",
+                        IsLive = true
+                    };
+
+                    if (video.TryGetProperty("title", out var t) &&
+                        t.TryGetProperty("runs", out var runs) && runs.GetArrayLength() > 0)
+                        result.Title = runs[0].GetProperty("text").GetString() ?? "";
+
+                    if (video.TryGetProperty("ownerText", out var o) &&
+                        o.TryGetProperty("runs", out var oruns) && oruns.GetArrayLength() > 0)
+                        result.Author = oruns[0].GetProperty("text").GetString() ?? "";
+
+                    if (video.TryGetProperty("thumbnail", out var th) &&
+                        th.TryGetProperty("thumbnails", out var thumbs))
+                    {
+                        result.ThumbnailUrl = PickThumbnail(thumbs.EnumerateArray()
+                            .Select(x => (
+                                Url: x.TryGetProperty("url", out var u) ? u.GetString() ?? "" : "",
+                                Width: x.TryGetProperty("width", out var w) ? w.GetInt32() : 0))
+                            .Where(x => x.Url.Length > 0)
+                            .ToList());
+                    }
+
+                    if (result.VideoId.Length > 0 && !string.IsNullOrWhiteSpace(result.Title))
+                        results.Add(result);
+                }
+
+                foreach (var property in element.EnumerateObject())
+                    WalkLiveResults(property.Value, results, max);
+            }
+            else if (element.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var child in element.EnumerateArray())
+                    WalkLiveResults(child, results, max);
+            }
         }
 
         // ═══════════ YouTube Music araması (InnerTube WEB_REMIX) ═══════════
@@ -341,6 +433,42 @@ namespace LiwaPlayer.Services
             var stream = manifest.GetAudioOnlyStreams().GetWithHighestBitrate();
 
             return stream.Url;
+        }
+
+        // Canlı yayın (radyo): HLS bağlantısı döner; LibVLC doğrudan çalar.
+        // ":no-video" seçeneğiyle sadece sesi çözülür, görselleştiricide video da açılabilir.
+        public async Task<string> GetLiveStreamUrlAsync(string videoId)
+        {
+            try
+            {
+                return await PreferredClient.Videos.Streams.GetHttpLiveStreamUrlAsync(videoId);
+            }
+            catch (Exception ex) when (_authClient != null)
+            {
+                LogService.Write($"Canlı akış (girişli, {videoId})", ex);
+
+                return await _anonClient.Videos.Streams.GetHttpLiveStreamUrlAsync(videoId);
+            }
+        }
+
+        // Klip modu: YouTube muxed akış vermediği için video-only (≤480p, CPU dostu)
+        // ve ses akışı ayrı çözülür; LibVLC input-slave ile birleştirir
+        public async Task<(string VideoUrl, string AudioUrl)> GetVideoStreamsAsync(string videoId)
+        {
+            var manifest = await PreferredClient.Videos.Streams.GetManifestAsync(videoId);
+
+            var video = manifest.GetVideoOnlyStreams()
+                    .Where(s => s.VideoQuality.MaxHeight <= 480)
+                    .OrderByDescending(s => s.VideoQuality.MaxHeight)
+                    .FirstOrDefault()
+                ?? manifest.GetVideoOnlyStreams()
+                    .OrderBy(s => s.VideoQuality.MaxHeight)
+                    .FirstOrDefault()
+                ?? throw new InvalidOperationException("Bu şarkının video akışı yok.");
+
+            var audio = manifest.GetAudioOnlyStreams().GetWithHighestBitrate();
+
+            return (video.Url, audio.Url);
         }
     }
 }

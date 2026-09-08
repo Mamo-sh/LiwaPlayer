@@ -51,15 +51,20 @@ namespace LiwaPlayer.Models
 
         public TimeSpan Duration { get; set; }
 
+        // Canlı yayın (radyo kanalı): süresi yoktur, bitmez, kopunca yeniden bağlanılır
+        public bool IsLive { get; set; }
+
         public bool Favorite { get; set; }
 
         public DateTime AddedDate { get; set; } = DateTime.Now;
 
         [JsonIgnore]
         public string DurationText =>
-            Duration.TotalHours >= 1
-                ? Duration.ToString(@"h\:mm\:ss")
-                : Duration.ToString(@"mm\:ss");
+            IsLive
+                ? "CANLI"
+                : Duration.TotalHours >= 1
+                    ? Duration.ToString(@"h\:mm\:ss")
+                    : Duration.ToString(@"mm\:ss");
 
         [JsonIgnore]
         public string SourceText => Source == SongSource.YouTube ? "YT" : "MP3";

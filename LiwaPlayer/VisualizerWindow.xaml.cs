@@ -1,4 +1,5 @@
 using System;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -12,14 +13,21 @@ using Point = System.Windows.Point;
 
 namespace LiwaPlayer
 {
-    // Müzikle uyumlu ritim hissi veren hafif görselleştirici. Gerçek spektrum
-    // analizi yapılmaz (POS işlemcisini yormamak için); çubuklar müzik çalarken
-    // yumuşatılmış rastgele tepe değerleriyle canlandırılır, duraklayınca söner.
+    // Görselleştirici: üç ışık stili + klip modu. Klipli (YouTube) şarkılarda
+    // pencere açılınca video otomatik oynar; tıklamayla stiller arasında dönülür.
+    // Işık stilleri gerçek spektrum analizi yapmaz (POS işlemcisini yormamak için).
     public partial class VisualizerWindow : Window
     {
         private const int BarCount = 48;
 
         private readonly Func<bool> _isPlaying;
+        private readonly LibVLCSharp.Shared.MediaPlayer _mediaPlayer;
+
+        // Klip moduna geçiş: ana pencere akışı video+ses olarak yeniden başlatır.
+        // false dönerse şarkının videosu yok demektir (yerel dosya vb.)
+        private readonly Func<Task<bool>> _switchToVideo;
+        private readonly Func<Task> _switchToAudio;
+
         private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(33) };
         private readonly Random _random = new();
 
@@ -28,20 +36,32 @@ namespace LiwaPlayer
         private readonly double[] _values = new double[BarCount];
         private readonly double[] _targets = new double[BarCount];
 
-        // 0 = alt çubuklar, 1 = ayna (ortadan), 2 = kapak etrafında halka
+        // 0 = klip (video), 1 = alt çubuklar, 2 = ayna, 3 = halka
         private int _mode;
+        private bool _videoActive;
+        private bool _switching;
 
         private WindowState _restoreState;
         private WindowStyle _restoreStyle;
         private bool _fullscreen;
 
-        public VisualizerWindow(Func<bool> isPlaying)
+        // Ana pencere şarkı değişiminde video modunu sürdürmek için okur
+        public bool IsVideoActive => _videoActive;
+
+        public VisualizerWindow(
+            Func<bool> isPlaying,
+            LibVLCSharp.Shared.MediaPlayer mediaPlayer,
+            Func<Task<bool>> switchToVideo,
+            Func<Task> switchToAudio)
         {
             InitializeComponent();
 
             UiScaleHelper.Apply(this);
 
             _isPlaying = isPlaying;
+            _mediaPlayer = mediaPlayer;
+            _switchToVideo = switchToVideo;
+            _switchToAudio = switchToAudio;
 
             var accent = (SolidColorBrush)FindResource("AccentBrush");
 
@@ -56,6 +76,9 @@ namespace LiwaPlayer
 
             _timer.Tick += Timer_Tick;
             _timer.Start();
+
+            // Klipli şarkıysa video ile başla; değilse ışık stiline düş
+            Loaded += async (_, _) => await TryEnterVideoModeAsync(fallbackMode: 1);
 
             Closed += (_, _) => _timer.Stop();
         }
@@ -76,6 +99,10 @@ namespace LiwaPlayer
             txtVisTitle.Text = title;
             txtVisArtist.Text = artist;
 
+            txtOverlayTitle.Text = string.IsNullOrWhiteSpace(artist)
+                ? title
+                : $"{title} — {artist}";
+
             try
             {
                 brushArt.ImageSource = string.IsNullOrWhiteSpace(coverUrl)
@@ -88,16 +115,95 @@ namespace LiwaPlayer
             }
         }
 
+        // ═══════════ Klip modu ═══════════
+
+        private async Task TryEnterVideoModeAsync(int fallbackMode)
+        {
+            if (_switching)
+                return;
+
+            _switching = true;
+
+            try
+            {
+                // Video yüzeyini hazırla (HWND oluşması için önce görünür olmalı)
+                videoView.Visibility = Visibility.Visible;
+                UpdateLayout();
+
+                if (videoView.MediaPlayer == null)
+                    videoView.MediaPlayer = _mediaPlayer;
+
+                bool ok = await _switchToVideo();
+
+                if (ok)
+                {
+                    _mode = 0;
+                    _videoActive = true;
+
+                    canvas.Visibility = Visibility.Collapsed;
+                    infoPanel.Visibility = Visibility.Collapsed;
+                }
+                else
+                {
+                    videoView.Visibility = Visibility.Collapsed;
+
+                    _mode = fallbackMode;
+                    _videoActive = false;
+
+                    canvas.Visibility = Visibility.Visible;
+                    infoPanel.Visibility = Visibility.Visible;
+                }
+            }
+            catch
+            {
+                videoView.Visibility = Visibility.Collapsed;
+                _mode = fallbackMode;
+                _videoActive = false;
+            }
+            finally
+            {
+                _switching = false;
+            }
+        }
+
+        private async Task LeaveVideoModeAsync(int newMode)
+        {
+            if (_switching)
+                return;
+
+            _switching = true;
+
+            try
+            {
+                videoView.Visibility = Visibility.Collapsed;
+                canvas.Visibility = Visibility.Visible;
+                infoPanel.Visibility = Visibility.Visible;
+
+                _mode = newMode;
+                _videoActive = false;
+
+                await _switchToAudio();
+            }
+            catch
+            {
+            }
+            finally
+            {
+                _switching = false;
+            }
+        }
+
         // ═══════════ Animasyon ═══════════
 
         private void Timer_Tick(object? sender, EventArgs e)
         {
+            if (_videoActive)
+                return;
+
             bool playing = _isPlaying();
 
             for (int i = 0; i < BarCount; i++)
             {
-                // Hedefe yaklaşınca yeni rastgele tepe seç; ritim hissi için
-                // komşu çubuklarla hafif ilişkilendir
                 if (Math.Abs(_values[i] - _targets[i]) < 0.03)
                 {
                     _targets[i] = playing
@@ -131,9 +237,9 @@ namespace LiwaPlayer
 
             switch (_mode)
             {
-                case 0: RenderBottomBars(w, h); break;
-                case 1: RenderMirror(w, h); break;
-                default: RenderRing(w, h); break;
+                case 1: RenderBottomBars(w, h); break;
+                case 2: RenderMirror(w, h); break;
+                case 3: RenderRing(w, h); break;
             }
         }
 
@@ -147,7 +253,7 @@ namespace LiwaPlayer
             {
                 double v = _values[i] * maxHeight + 2;
 
-                Place(_bars[i], gap * i + (gap - barWidth) / 2, h - v, barWidth, v, 0);
+                Place(_bars[i], gap * i + (gap - barWidth) / 2, h - v, barWidth, v);
                 _mirrorBars[i].Visibility = Visibility.Collapsed;
             }
         }
@@ -164,10 +270,10 @@ namespace LiwaPlayer
                 double v = _values[i] * maxHeight + 2;
                 double x = gap * i + (gap - barWidth) / 2;
 
-                Place(_bars[i], x, center - v, barWidth, v, 0);
+                Place(_bars[i], x, center - v, barWidth, v);
 
                 _mirrorBars[i].Visibility = Visibility.Visible;
-                Place(_mirrorBars[i], x, center + 2, barWidth, v * 0.5, 0);
+                Place(_mirrorBars[i], x, center + 2, barWidth, v * 0.5);
             }
         }
 
@@ -205,7 +311,7 @@ namespace LiwaPlayer
             }
         }
 
-        private static void Place(Rectangle bar, double x, double y, double width, double height, double angle)
+        private static void Place(Rectangle bar, double x, double y, double width, double height)
         {
             bar.Width = width;
             bar.Height = height;
@@ -217,11 +323,25 @@ namespace LiwaPlayer
 
         // ═══════════ Etkileşim ═══════════
 
-        private void Window_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+        private async void Window_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
         {
-            _mode = (_mode + 1) % 3;
+            if (_switching)
+                return;
 
-            // Halka modunda bilgi paneli ortada kalır; diğerlerinde de ortada iyi durur
+            // Döngü: klip → çubuklar → ayna → halka → klip ...
+            if (_videoActive)
+            {
+                await LeaveVideoModeAsync(newMode: 1);
+            }
+            else if (_mode >= 3)
+            {
+                await TryEnterVideoModeAsync(fallbackMode: 1);
+            }
+            else
+            {
+                _mode++;
+            }
+
             Render();
         }
 
@@ -265,5 +385,26 @@ namespace LiwaPlayer
         }
 
         private void Window_SizeChanged(object sender, SizeChangedEventArgs e) => Render();
+
+        protected override async void OnClosed(EventArgs e)
+        {
+            // Pencere kapanırken video moddaysak sese geri dön (CPU tasarrufu)
+            try
+            {
+                if (_videoActive)
+                {
+                    _videoActive = false;
+                    await _switchToAudio();
+                }
+
+                videoView.MediaPlayer = null;
+                videoView.Dispose();
+            }
+            catch
+            {
+            }
+
+            base.OnClosed(e);
+        }
     }
 }

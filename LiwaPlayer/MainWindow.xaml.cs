@@ -528,7 +528,14 @@ namespace LiwaPlayer
                 return;
             }
 
-            _visualizer = new VisualizerWindow(() => _player.IsPlaying) { Owner = this };
+            _visualizer = new VisualizerWindow(
+                () => _player.IsPlaying,
+                _player.MediaPlayer,
+                SwitchToVideoAsync,
+                SwitchToAudioAsync)
+            {
+                Owner = this
+            };
 
             _visualizer.Closed += (_, _) => _visualizer = null;
 
@@ -538,6 +545,77 @@ namespace LiwaPlayer
                 _visualizer.UpdateSong(song.Title, song.Artist, song.CoverImage);
 
             _visualizer.Show();
+        }
+
+        // Görselleştirici klip moduna geçerken: mevcut şarkıyı kaldığı yerden
+        // video+ses olarak yeniden başlatır. Video yoksa false döner.
+        private async System.Threading.Tasks.Task<bool> SwitchToVideoAsync()
+        {
+            var song = _playlist.CurrentSong;
+
+            if (song == null || song.Source != SongSource.YouTube)
+                return false;
+
+            long resumeTime = _player.CurrentTime;
+
+            try
+            {
+                if (song.IsLive)
+                {
+                    var url = await _youtube.GetLiveStreamUrlAsync(song.FileName);
+                    _player.Play(url, withVideo: true);
+                }
+                else
+                {
+                    var (videoUrl, audioUrl) = await _youtube.GetVideoStreamsAsync(song.FileName);
+
+                    _player.PlayWithSlaveAudio(videoUrl, audioUrl);
+
+                    // Medyanın açılmasını bekleyip kaldığı saniyeye dön
+                    await System.Threading.Tasks.Task.Delay(900);
+                    _player.Seek(resumeTime);
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                LogService.Write($"Klip moduna geçiş ({song.Title})", ex);
+                return false;
+            }
+        }
+
+        // Klip modundan çıkarken: sadece ses akışına geri dön (CPU tasarrufu)
+        private async System.Threading.Tasks.Task SwitchToAudioAsync()
+        {
+            var song = _playlist.CurrentSong;
+
+            if (song == null || song.Source != SongSource.YouTube)
+                return;
+
+            long resumeTime = _player.CurrentTime;
+
+            try
+            {
+                if (song.IsLive)
+                {
+                    var url = await _youtube.GetLiveStreamUrlAsync(song.FileName);
+                    _player.Play(url);
+                }
+                else
+                {
+                    var url = await _youtube.GetAudioStreamUrlAsync(song.FileName);
+
+                    _player.Play(url);
+
+                    await System.Threading.Tasks.Task.Delay(900);
+                    _player.Seek(resumeTime);
+                }
+            }
+            catch (Exception ex)
+            {
+                LogService.Write($"Ses moduna dönüş ({song.Title})", ex);
+            }
         }
 
         private static string FormatSongLabel(Song song) =>
@@ -613,7 +691,41 @@ namespace LiwaPlayer
 
             try
             {
+                // Görselleştirici klip modundaysa yeni şarkı da videolu başlasın
+                bool wantVideo = _visualizer is { IsVideoActive: true } &&
+                                 song.Source == SongSource.YouTube;
+
                 string location;
+
+                if (song.Source == SongSource.YouTube && song.IsLive)
+                {
+                    SetStatus("🔴 Canlı yayına bağlanılıyor...");
+                    location = await _youtube.GetLiveStreamUrlAsync(song.FileName);
+
+                    if (token != _playToken)
+                        return;
+
+                    _player.Play(location, withVideo: wantVideo);
+                    SetStatus("🔴 Canlı yayın çalınıyor");
+
+                    _settings.Current.LastSong = song.Id.ToString();
+                    return;
+                }
+
+                if (song.Source == SongSource.YouTube && wantVideo)
+                {
+                    SetStatus("Klip hazırlanıyor...");
+                    var (videoUrl, audioUrl) = await _youtube.GetVideoStreamsAsync(song.FileName);
+
+                    if (token != _playToken)
+                        return;
+
+                    _player.PlayWithSlaveAudio(videoUrl, audioUrl);
+                    SetStatus("Klip oynatılıyor");
+
+                    _settings.Current.LastSong = song.Id.ToString();
+                    return;
+                }
 
                 if (song.Source == SongSource.YouTube)
                 {
@@ -696,6 +808,14 @@ namespace LiwaPlayer
         {
             if (_playlist.CurrentSong == null)
                 return;
+
+            // Canlı yayın normalde bitmez; buraya düştüyse bağlantı kopmuştur
+            if (_playlist.CurrentSong.IsLive)
+            {
+                SetStatus("🔴 Yayın koptu, yeniden bağlanılıyor...");
+                PlaySong(_playlist.CurrentSong, CurrentPlaybackPlaylist);
+                return;
+            }
 
             var playlist = CurrentPlaybackPlaylist;
             var songs = playlist.Songs;
@@ -1089,6 +1209,19 @@ namespace LiwaPlayer
                 SearchYouTubeAsync();
         }
 
+        // Radyo sekmesine geçilince kutu boşsa hazır kanallar listelensin
+        private void rbSearchRadio_Checked(object sender, RoutedEventArgs e)
+        {
+            if (txtSearch == null || btnSearch == null)
+                return;
+
+            if (string.IsNullOrWhiteSpace(txtSearch.Text))
+            {
+                txtSearch.Text = "canlı radyo";
+                SearchYouTubeAsync();
+            }
+        }
+
         private void btnSearch_Click(object sender, RoutedEventArgs e) => SearchYouTubeAsync();
 
         private async void SearchYouTubeAsync()
@@ -1119,9 +1252,10 @@ namespace LiwaPlayer
             {
                 int max = Math.Clamp(_settings.Current.SearchResultCount, 5, 50);
 
-                var results = rbSearchMusic.IsChecked == true
-                    ? await _youtube.SearchMusicAsync(query, max)
-                    : await _youtube.SearchAsync(query, max);
+                var results =
+                    rbSearchRadio.IsChecked == true ? await _youtube.SearchLiveAsync(query, max) :
+                    rbSearchMusic.IsChecked == true ? await _youtube.SearchMusicAsync(query, max) :
+                    await _youtube.SearchAsync(query, max);
 
                 lstResults.ItemsSource = results;
 
@@ -1219,7 +1353,8 @@ namespace LiwaPlayer
                 Artist = result.Author,
                 Duration = result.Duration,
                 Source = SongSource.YouTube,
-                CoverImage = result.ThumbnailUrl
+                CoverImage = result.ThumbnailUrl,
+                IsLive = result.IsLive
             };
 
             target = ResolveTargetPlaylist(result.Title);

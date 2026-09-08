@@ -17,8 +17,9 @@ namespace LiwaPlayer.Services
         {
             Core.Initialize();
 
-            // Ses çalar: video kod çözümü tamamen kapalı, POS makinelerinde CPU harcamaz
-            _libVLC = new LibVLC("--no-video", "--quiet");
+            // Video kod çözümü medya bazında kontrol edilir: normal çalmada ":no-video"
+            // ile kapalıdır (CPU harcamaz), görselleştiricide klip için açılır
+            _libVLC = new LibVLC("--quiet");
             _mediaPlayer = new MediaPlayer(_libVLC);
 
             _mediaPlayer.EndReached += MediaPlayer_EndReached;
@@ -26,6 +27,9 @@ namespace LiwaPlayer.Services
         }
 
         public bool IsPlaying => _mediaPlayer.IsPlaying;
+
+        // Görselleştirici penceresi klip gösterirken VideoView'a bağlanır
+        public MediaPlayer MediaPlayer => _mediaPlayer;
 
         // YouTube akışları için ağ önbelleği; optimizasyon ayarlarından değişir
         public int NetworkCachingMs { get; set; } = 3000;
@@ -48,7 +52,7 @@ namespace LiwaPlayer.Services
             set => _mediaPlayer.Position = Math.Clamp(value, 0f, 1f);
         }
 
-        public void Play(string location)
+        public void Play(string location, bool withVideo = false)
         {
             if (string.IsNullOrWhiteSpace(location))
                 return;
@@ -57,9 +61,32 @@ namespace LiwaPlayer.Services
 
             bool isRemote = location.StartsWith("http", StringComparison.OrdinalIgnoreCase);
 
-            _currentMedia = isRemote
-                ? new Media(_libVLC, new Uri(location), $":network-caching={NetworkCachingMs}")
-                : new Media(_libVLC, new Uri(location));
+            var options = new System.Collections.Generic.List<string>();
+
+            if (isRemote)
+                options.Add($":network-caching={NetworkCachingMs}");
+
+            // Video parçası olsa bile (canlı yayınlar gibi) kod çözme; CPU tasarrufu
+            if (!withVideo)
+                options.Add(":no-video");
+
+            _currentMedia = new Media(_libVLC, new Uri(location), options.ToArray());
+
+            _mediaPlayer.Play(_currentMedia);
+        }
+
+        // Klip modu: YouTube artık tek dosyada video+ses vermediği için video-only
+        // akış, ses akışı input-slave olarak eklenerek birlikte oynatılır
+        public void PlayWithSlaveAudio(string videoUrl, string audioUrl)
+        {
+            if (string.IsNullOrWhiteSpace(videoUrl) || string.IsNullOrWhiteSpace(audioUrl))
+                return;
+
+            Stop();
+
+            _currentMedia = new Media(_libVLC, new Uri(videoUrl),
+                $":input-slave={audioUrl}",
+                $":network-caching={NetworkCachingMs}");
 
             _mediaPlayer.Play(_currentMedia);
         }
