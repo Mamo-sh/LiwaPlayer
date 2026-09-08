@@ -45,6 +45,11 @@ namespace LiwaPlayer
         // açıldığında kullanıcının tercihiyle başlar
         private static int _lastMode = 1;
 
+        // Tek tık (stil değiştir) ile çift tık (tam ekran) ayrımı: tek tık
+        // kısa bir gecikmeyle işlenir, çift tık gelirse iptal edilir
+        private readonly DispatcherTimer _clickTimer = new() { Interval = TimeSpan.FromMilliseconds(280) };
+        private bool _suppressNextClick;
+
         private WindowState _restoreState;
         private WindowStyle _restoreStyle;
         private bool _fullscreen;
@@ -80,6 +85,12 @@ namespace LiwaPlayer
 
             _timer.Tick += Timer_Tick;
             _timer.Start();
+
+            _clickTimer.Tick += async (_, _) =>
+            {
+                _clickTimer.Stop();
+                await CycleModeAsync();
+            };
 
             // Işık stiliyle açılır; klip, tıklama döngüsündeki seçeneklerden biridir.
             // Son seçilen stil (klip dahil) hatırlanır.
@@ -141,8 +152,7 @@ namespace LiwaPlayer
                 videoView.Visibility = Visibility.Visible;
                 UpdateLayout();
 
-                if (videoView.MediaPlayer == null)
-                    videoView.MediaPlayer = _mediaPlayer;
+                videoView.MediaPlayer = _mediaPlayer;
 
                 bool ok = await _switchToVideo();
 
@@ -157,6 +167,7 @@ namespace LiwaPlayer
                 }
                 else
                 {
+                    videoView.MediaPlayer = null;
                     videoView.Visibility = Visibility.Collapsed;
 
                     _mode = fallbackMode;
@@ -165,10 +176,13 @@ namespace LiwaPlayer
 
                     canvas.Visibility = Visibility.Visible;
                     infoPanel.Visibility = Visibility.Visible;
+
+                    InvalidateVisual();
                 }
             }
             catch
             {
+                videoView.MediaPlayer = null;
                 videoView.Visibility = Visibility.Collapsed;
                 _mode = fallbackMode;
                 _videoActive = false;
@@ -188,13 +202,20 @@ namespace LiwaPlayer
 
             try
             {
+                // Video penceresini oynatıcıdan tamamen ayır; ayrılmazsa WPF o
+                // bölgeyi yeniden çizemiyor ve "kazı kazan" görüntüsü kalıyor
+                videoView.MediaPlayer = null;
                 videoView.Visibility = Visibility.Collapsed;
+
                 canvas.Visibility = Visibility.Visible;
                 infoPanel.Visibility = Visibility.Visible;
 
                 _mode = newMode;
                 _lastMode = newMode;
                 _videoActive = false;
+
+                InvalidateVisual();
+                UpdateLayout();
 
                 await _switchToAudio();
             }
@@ -337,12 +358,41 @@ namespace LiwaPlayer
 
         // ═══════════ Etkileşim ═══════════
 
-        private async void Window_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+        private void Window_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+        {
+            // Çift tıkın ikinci bırakması stil değiştirmesin
+            if (_suppressNextClick)
+            {
+                _suppressNextClick = false;
+                return;
+            }
+
+            _clickTimer.Stop();
+            _clickTimer.Start();
+        }
+
+        private void Window_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+        {
+            _clickTimer.Stop();
+            _suppressNextClick = true;
+
+            ToggleFullscreen();
+            Activate();
+        }
+
+        // Grid'de MouseDoubleClick olayı yok; çift tık ClickCount ile yakalanır
+        private void overlayRoot_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            if (e.ClickCount == 2)
+                Window_MouseDoubleClick(sender, e);
+        }
+
+        // Döngü: çubuklar → ayna → halka → klip → çubuklar ...
+        private async Task CycleModeAsync()
         {
             if (_switching)
                 return;
 
-            // Döngü: klip → çubuklar → ayna → halka → klip ...
             if (_videoActive)
             {
                 await LeaveVideoModeAsync(newMode: 1);
@@ -357,10 +407,11 @@ namespace LiwaPlayer
                 _lastMode = _mode;
             }
 
+            // Klavye odağı video katmanında kalmasın (Esc çalışmaya devam etsin)
+            Activate();
+
             Render();
         }
-
-        private void Window_MouseDoubleClick(object sender, MouseButtonEventArgs e) => ToggleFullscreen();
 
         private void Window_KeyDown(object sender, KeyEventArgs e)
         {
