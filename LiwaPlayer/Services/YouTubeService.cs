@@ -458,7 +458,7 @@ namespace LiwaPlayer.Services
             var manifest = await PreferredClient.Videos.Streams.GetManifestAsync(videoId);
 
             var video = manifest.GetVideoOnlyStreams()
-                    .Where(s => s.VideoQuality.MaxHeight <= 480)
+                    .Where(s => s.VideoQuality.MaxHeight <= 360)
                     .OrderByDescending(s => s.VideoQuality.MaxHeight)
                     .FirstOrDefault()
                 ?? manifest.GetVideoOnlyStreams()

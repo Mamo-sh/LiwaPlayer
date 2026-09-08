@@ -21,6 +21,17 @@
     <PackageReference Include="YoutubeExplode" Version="6.6.2" />
   </ItemGroup>
 
+  <PropertyGroup>
+    <!-- Bellek-cimri GC: POS makinelerinde düşük RAM hedefi -->
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 0-9: 9 = belleği en agresif şekilde işletim sistemine iade et -->
+    <RuntimeHostConfigurationOption Include="System.GC.ConserveMemory" Value="9" />
+    <RuntimeHostConfigurationOption Include="System.GC.RetainVM" Value="false" />
+  </ItemGroup>
+
   <ItemGroup>
     <Resource Include="Assets\youtube-logo.png" />
   </ItemGroup>

@@ -54,6 +54,10 @@ namespace LiwaPlayer
         private readonly System.Collections.Generic.Queue<Song> _downloadQueue = new();
         private bool _downloading;
 
+        // Bellek bekçisi: 100 MB tavanı aşılırsa bellek anında kırpılır
+        private const long MemoryLimitBytes = 100 * 1024 * 1024;
+        private readonly DispatcherTimer _memoryGuard = new() { Interval = TimeSpan.FromSeconds(15) };
+
         public MainWindow()
         {
             InitializeComponent();
@@ -90,12 +94,18 @@ namespace LiwaPlayer
             _timer.Tick += Timer_Tick;
             _timer.Start();
 
+            _memoryGuard.Tick += (_, _) => EnforceMemoryLimit();
+            _memoryGuard.Start();
+
             ApplyOptimizationSettings();
 
             Loaded += async (_, _) =>
             {
                 // Ana ekranda YouTube ana sayfası gibi öneriler göster
                 await LoadRecommendationsAsync();
+
+                // Açılış + öneri yüklemesinin şişirdiği belleği hemen iade et
+                TrimMemory();
 
                 // Açılıştan kısa süre sonra arka planda güncelleme denetle
                 if (_settings.Current.CheckUpdatesOnStartup)
@@ -557,6 +567,21 @@ namespace LiwaPlayer
 
         [System.Runtime.InteropServices.DllImport("psapi.dll")]
         private static extern bool EmptyWorkingSet(IntPtr hProcess);
+
+        // 20 saniyede bir çalışır: tavan aşıldıysa belleği hemen iade et
+        private static void EnforceMemoryLimit()
+        {
+            try
+            {
+                using var process = System.Diagnostics.Process.GetCurrentProcess();
+
+                if (process.WorkingSet64 > MemoryLimitBytes)
+                    TrimMemory();
+            }
+            catch
+            {
+            }
+        }
 
         private void coverBox_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
         {
