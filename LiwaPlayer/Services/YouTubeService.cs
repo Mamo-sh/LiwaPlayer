@@ -588,6 +588,102 @@ namespace LiwaPlayer.Services
             }
         }
 
+        // ═══════════ Hesabın kendi listeleri (en iyi çaba) ═══════════
+
+        // Hesabın "Kitaplık" sayfasındaki tüm oynatma listelerini (kendi
+        // oluşturdukları) tarar. Belgelenmemiş bir uç nokta kullanır; sadece
+        // sayfanın ilk yüklemesinde gelen listeleri yakalar (çok sayıda listesi
+        // olan hesaplarda "devamını yükle" sayfalaması işlenmez). LL/WL
+        // (Beğenilen/Daha Sonra İzle) zaten ayrı yolla çekildiği için hariç tutulur.
+        public async Task<List<(string PlaylistId, string Title)>> FetchOwnPlaylistsAsync(
+            IReadOnlyList<Cookie>? cookies)
+        {
+            if (cookies == null || cookies.Count == 0)
+                return new List<(string, string)>();
+
+            try
+            {
+                var body = JsonSerializer.Serialize(new
+                {
+                    context = new
+                    {
+                        client = new
+                        {
+                            clientName = "WEB",
+                            clientVersion = "2.20250312.04.00",
+                            hl = "tr",
+                            gl = "TR"
+                        }
+                    },
+                    browseId = "FElibrary"
+                });
+
+                using var request = BuildAuthenticatedRequest(
+                    "https://www.youtube.com/youtubei/v1/browse?prettyPrint=false",
+                    body, cookies);
+
+                using var response = await Http.SendAsync(request);
+
+                if (!response.IsSuccessStatusCode)
+                    return new List<(string, string)>();
+
+                var json = await response.Content.ReadAsStringAsync();
+
+                var results = new List<(string, string)>();
+
+                using var doc = JsonDocument.Parse(json);
+                WalkPlaylistRenderers(doc.RootElement, results);
+
+                return results;
+            }
+            catch (Exception ex)
+            {
+                LogService.Write("Hesap listeleri alınamadı (en iyi çaba)", ex);
+                return new List<(string, string)>();
+            }
+        }
+
+        // Renderer adı ne olursa olsun (gridPlaylistRenderer, compactPlaylistRenderer
+        // vb. — YouTube sürüme göre değiştirebiliyor), "playlistId" ve "title"
+        // birlikte bulunan her düğümü bir liste olarak kabul eder
+        private static void WalkPlaylistRenderers(JsonElement element, List<(string Id, string Title)> results)
+        {
+            if (element.ValueKind == JsonValueKind.Object)
+            {
+                if (element.TryGetProperty("playlistId", out var pidEl) &&
+                    pidEl.ValueKind == JsonValueKind.String)
+                {
+                    var pid = pidEl.GetString();
+                    string? title = null;
+
+                    if (element.TryGetProperty("title", out var titleEl))
+                    {
+                        if (titleEl.ValueKind == JsonValueKind.String)
+                            title = titleEl.GetString();
+                        else if (titleEl.TryGetProperty("simpleText", out var simple))
+                            title = simple.GetString();
+                        else if (titleEl.TryGetProperty("runs", out var runs) && runs.GetArrayLength() > 0)
+                            title = runs[0].GetProperty("text").GetString();
+                    }
+
+                    if (!string.IsNullOrEmpty(pid) && !string.IsNullOrWhiteSpace(title) &&
+                        pid != "LL" && pid != "WL" &&
+                        !results.Any(r => r.Id == pid))
+                    {
+                        results.Add((pid!, title!));
+                    }
+                }
+
+                foreach (var property in element.EnumerateObject())
+                    WalkPlaylistRenderers(property.Value, results);
+            }
+            else if (element.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var child in element.EnumerateArray())
+                    WalkPlaylistRenderers(child, results);
+            }
+        }
+
         // ═══════════ Akış çözümleme ═══════════
 
         // Video indirilmez; sadece ses akışının URL'si çözülür ve LibVLC'ye verilir.

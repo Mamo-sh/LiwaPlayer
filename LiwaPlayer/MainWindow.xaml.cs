@@ -1421,6 +1421,36 @@ namespace LiwaPlayer
 
             await ImportSpecialPlaylistAsync("Beğenilen Videolar", "LL");
             await ImportSpecialPlaylistAsync("Daha Sonra İzle", "WL");
+
+            await ImportOwnPlaylistsAsync();
+        }
+
+        // Hesaptaki tüm kendi oynatma listelerini (LL/WL hariç) tek tek çekip
+        // yerel playlist'lere dönüştürür. Kütüphane taraması en-iyi-çaba
+        // olduğundan boş/başarısız dönerse sessizce hiçbir şey yapılmaz.
+        private async Task ImportOwnPlaylistsAsync()
+        {
+            try
+            {
+                var playlists = await _youtube.FetchOwnPlaylistsAsync(_auth.Cookies);
+
+                if (playlists.Count == 0)
+                    return;
+
+                int syncedCount = 0;
+
+                foreach (var (playlistId, title) in playlists)
+                {
+                    await ImportSpecialPlaylistAsync(title, playlistId);
+                    syncedCount++;
+                }
+
+                SetStatus($"Hesabındaki {syncedCount} oynatma listesi senkronize edildi.");
+            }
+            catch (Exception ex)
+            {
+                LogService.Write("Hesap listeleri içe aktarma", ex);
+            }
         }
 
         // "LL" (Beğenilen Videolar) ve "WL" (Daha Sonra İzle) YouTube'un özel
