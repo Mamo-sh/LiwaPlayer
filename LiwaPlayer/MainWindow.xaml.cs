@@ -451,6 +451,8 @@ namespace LiwaPlayer
             menu.Items.Add(new WinForms.ToolStripSeparator());
             menu.Items.Add("Güncellemeleri Denetle", null,
                 async (_, _) => await CheckForUpdatesAsync(silent: false));
+            menu.Items.Add("YouTube Hesabını Yenile (avatar/Premium/listeler)", null,
+                async (_, _) => await RefreshAccountAsync());
             menu.Items.Add("Çıkış", null, (_, _) => ExitApplication());
 
             _tray.ContextMenuStrip = menu;
@@ -1412,6 +1414,25 @@ namespace LiwaPlayer
             ApplyAccountInfo(info);
 
             await ImportSpecialPlaylistsAsync();
+        }
+
+        // Uygulama yeniden başlatılmadan hesap bilgilerini/listelerini elle
+        // tazelemek için (tepsi menüsü → "YouTube Hesabını Yenile")
+        private async Task RefreshAccountAsync()
+        {
+            if (!_auth.IsLoggedIn)
+            {
+                ShowFromTray();
+                SetStatus("Önce YouTube hesabınla giriş yapmalısın.");
+                return;
+            }
+
+            ShowFromTray();
+            SetStatus("Hesap bilgileri yenileniyor...");
+
+            await OnLoggedInAsync();
+
+            SetStatus("Hesap bilgileri yenilendi.");
         }
 
         private async Task ImportSpecialPlaylistsAsync()

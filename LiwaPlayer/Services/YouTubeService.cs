@@ -474,9 +474,16 @@ namespace LiwaPlayer.Services
                 using var response = await Http.SendAsync(request);
 
                 if (!response.IsSuccessStatusCode)
+                {
+                    LogService.Write($"Hesap bilgisi HTTP {(int)response.StatusCode} döndü.");
                     return null;
+                }
 
                 var json = await response.Content.ReadAsStringAsync();
+
+                // Tanı amaçlı: ayrıştırma yanlış çıkarsa bu dosyanın içeriği
+                // sorunu kesin olarak gösterir (Data\debug_account_menu.json)
+                LogService.WriteDebugDump("debug_account_menu.json", json);
 
                 using var doc = JsonDocument.Parse(json);
 
@@ -570,9 +577,14 @@ namespace LiwaPlayer.Services
                 using var response = await Http.SendAsync(request);
 
                 if (!response.IsSuccessStatusCode)
+                {
+                    LogService.Write($"Abonelik akışı HTTP {(int)response.StatusCode} döndü.");
                     return new List<YouTubeSearchResult>();
+                }
 
                 var json = await response.Content.ReadAsStringAsync();
+
+                LogService.WriteDebugDump("debug_subscriptions.json", json);
 
                 var results = new List<YouTubeSearchResult>();
 
@@ -625,9 +637,14 @@ namespace LiwaPlayer.Services
                 using var response = await Http.SendAsync(request);
 
                 if (!response.IsSuccessStatusCode)
+                {
+                    LogService.Write($"Hesap listeleri HTTP {(int)response.StatusCode} döndü.");
                     return new List<(string, string)>();
+                }
 
                 var json = await response.Content.ReadAsStringAsync();
+
+                LogService.WriteDebugDump("debug_library.json", json);
 
                 var results = new List<(string, string)>();
 

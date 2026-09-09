@@ -16,6 +16,21 @@ namespace LiwaPlayer.Services
             Write($"{context}: {ex.GetType().Name}: {ex.Message}" +
                   (ex.InnerException != null ? $" | İç: {ex.InnerException.Message}" : ""));
 
+        // Belgelenmemiş YouTube uç noktalarının ham yanıtını Data\ klasörüne
+        // ayrı bir dosya olarak kaydeder (log.txt'nin dışında, rotasyondan
+        // etkilenmez). Bir özellik (avatar/Premium/liste vb.) yanlış çalışırsa
+        // bu dosyanın içeriği asıl nedeni kesin olarak gösterir.
+        public static void WriteDebugDump(string filename, string content)
+        {
+            try
+            {
+                File.WriteAllText(Path.Combine(AppPaths.DataFolder, filename), content);
+            }
+            catch
+            {
+            }
+        }
+
         public static void Write(string message)
         {
             try
