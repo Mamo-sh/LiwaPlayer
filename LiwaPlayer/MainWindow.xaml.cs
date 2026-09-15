@@ -1,4 +1,4 @@
-using LiwaPlayer.Models;
+﻿using LiwaPlayer.Models;
 using LiwaPlayer.Services;
 using Microsoft.Win32;
 using System;
@@ -70,6 +70,18 @@ namespace LiwaPlayer
         // Hesap girişi sonrası en iyi çaba ile çekilir (avatar, Premium durumu)
         private bool _isPremiumAccount;
 
+        // Görev çubuğu simgesinin üzerine gelince çıkan küçük resim araç
+        // çubuğu (tepsi simgesinden farklı — Windows'un resmi ITaskbarList3 API'si)
+        private TaskbarThumbButtons? _taskbarButtons;
+
+        // Gerçek internet erişimini izler; kopunca/gelince kullanıcıya sorar
+        private readonly NetworkMonitorService _network = new();
+
+        private const string DownloadedPlaylistName = "İndirilen Şarkılar";
+
+        // Önceki şarkı butonunda "baştan başlat" eşiği (Spotify tarzı akıllı önceki)
+        private const long PreviousRestartThresholdMs = 3000;
+
         public MainWindow()
         {
             InitializeComponent();
@@ -78,6 +90,10 @@ namespace LiwaPlayer
             txtAppVersion.Text = _baseTitle;
 
             InitTray();
+            InitTaskbarButtons();
+
+            _network.ConnectionLost += OnConnectionLost;
+            _network.ConnectionRestored += OnConnectionRestored;
 
             Closing += MainWindow_Closing;
 
@@ -444,8 +460,7 @@ namespace LiwaPlayer
             menu.Items.Add("Göster", null, (_, _) => ShowFromTray());
             menu.Items.Add(new WinForms.ToolStripSeparator());
             menu.Items.Add("Oynat / Duraklat", null, (_, _) => TogglePlayPause());
-            menu.Items.Add("Önceki", null, (_, _) =>
-                PlaySong(_playlist.Previous(CurrentPlaybackPlaylist), CurrentPlaybackPlaylist));
+            menu.Items.Add("Önceki", null, (_, _) => PreviousOrRestart());
             menu.Items.Add("Sonraki", null, (_, _) =>
                 PlaySong(GetNextSong(), CurrentPlaybackPlaylist));
             menu.Items.Add(new WinForms.ToolStripSeparator());
@@ -456,6 +471,72 @@ namespace LiwaPlayer
             menu.Items.Add("Çıkış", null, (_, _) => ExitApplication());
 
             _tray.ContextMenuStrip = menu;
+        }
+
+        // ═══════════════ Görev çubuğu düğmeleri ═══════════════
+
+        private void InitTaskbarButtons()
+        {
+            _taskbarButtons = new TaskbarThumbButtons(this);
+
+            _taskbarButtons.PreviousClicked += () => Dispatcher.Invoke(PreviousOrRestart);
+            _taskbarButtons.PlayPauseClicked += () => Dispatcher.Invoke(TogglePlayPause);
+            _taskbarButtons.NextClicked += () =>
+                Dispatcher.Invoke(() => PlaySong(GetNextSong(), CurrentPlaybackPlaylist));
+        }
+
+        // ═══════════════ İnternet bağlantısı ═══════════════
+
+        private void OnConnectionLost()
+        {
+            if (string.Equals(_playlist.ActivePlaylist.Name, DownloadedPlaylistName,
+                    StringComparison.OrdinalIgnoreCase))
+                return; // zaten indirilenler listesindeyiz, tekrar sorma
+
+            var downloaded = _playlist.Playlists.FirstOrDefault(p =>
+                string.Equals(p.Name, DownloadedPlaylistName, StringComparison.OrdinalIgnoreCase));
+
+            if (downloaded == null || downloaded.Songs.Count == 0)
+            {
+                SetStatus("🔌 İnternet bağlantısı yok.");
+                return;
+            }
+
+            ShowFromTray();
+
+            var answer = MessageBox.Show(this,
+                "İnternet bağlantısı yok. İndirilen şarkıları dinlemek ister misiniz?",
+                "Bağlantı Yok",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+
+            if (answer == MessageBoxResult.Yes)
+            {
+                _playlist.SetActive(downloaded);
+                BindActivePlaylist();
+                SetStatus("İndirilen şarkılar listesine geçildi.");
+            }
+        }
+
+        private void OnConnectionRestored()
+        {
+            // Kullanıcı çevrimdışıyken indirilenler listesine geçmediyse
+            // (soruyu reddetti veya sorulmadı), geri alacak bir şey yok
+            if (!string.Equals(_playlist.ActivePlaylist.Name, DownloadedPlaylistName,
+                    StringComparison.OrdinalIgnoreCase))
+                return;
+
+            SetStatus("İnternet bağlantısı geri geldi. Müzik listenize geri aktarılıyorsunuz.");
+
+            var music = _playlist.Playlists.FirstOrDefault(p =>
+                string.Equals(p.Name, "Müzik", StringComparison.OrdinalIgnoreCase))
+                ?? _playlist.Playlists.FirstOrDefault();
+
+            if (music != null)
+            {
+                _playlist.SetActive(music);
+                BindActivePlaylist();
+            }
         }
 
         public void ShowFromTray()
@@ -558,6 +639,7 @@ namespace LiwaPlayer
         private void Timer_Tick(object? sender, EventArgs e)
         {
             btnPlayPause.Content = _player.IsPlaying ? "" : "";
+            _taskbarButtons?.SetPlaying(_player.IsPlaying);
 
             if (_player.Duration <= 0)
                 return;
@@ -1055,8 +1137,24 @@ namespace LiwaPlayer
         private void btnNext_Click(object sender, RoutedEventArgs e) =>
             PlaySong(GetNextSong(), CurrentPlaybackPlaylist);
 
-        private void btnPrevious_Click(object sender, RoutedEventArgs e) =>
+        private void btnPrevious_Click(object sender, RoutedEventArgs e) => PreviousOrRestart();
+
+        // Spotify tarzı "akıllı önceki": şarkı birkaç saniyeden fazla ilerlediyse
+        // başa sarar; en baştaysa (veya canlı yayınsa) gerçek önceki şarkıya geçer
+        private void PreviousOrRestart()
+        {
+            bool nearStart = !_player.HasMedia || _player.CurrentTime <= PreviousRestartThresholdMs;
+            bool isLive = _playlist.CurrentSong?.IsLive ?? false;
+
+            if (!nearStart && !isLive)
+            {
+                _player.Seek(0);
+                SetStatus("Baştan başlatıldı.");
+                return;
+            }
+
             PlaySong(_playlist.Previous(CurrentPlaybackPlaylist), CurrentPlaybackPlaylist);
+        }
 
         private void sliderVolume_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
         {
@@ -1272,12 +1370,24 @@ namespace LiwaPlayer
                 {
                     var song = _downloadQueue.Dequeue();
 
-                    bool ok = await _downloader.DownloadMp3Async(song.FileName,
+                    var (ok, filePath) = await _downloader.DownloadMp3Async(song.FileName,
                         new Progress<int>(p => SetStatus($"⬇ {song.Title} — %{p}")));
 
-                    SetStatus(ok
-                        ? $"✔ İndirildi: {song.Title}  (Müzik\\LiwaPlayer)"
-                        : $"İndirilemedi: {song.Title}");
+                    if (ok && !string.IsNullOrWhiteSpace(filePath) && File.Exists(filePath))
+                    {
+                        await AddDownloadedSongToPlaylistAsync(filePath, song);
+                        SetStatus($"✔ İndirildi: {song.Title}  ({DownloadedPlaylistName} listesine eklendi)");
+                    }
+                    else if (ok)
+                    {
+                        // Dosya yolu ayrıştırılamadıysa (beklenmeyen yt-dlp çıktısı)
+                        // en azından dosya diskte var, sadece listeye eklenemedi
+                        SetStatus($"✔ İndirildi: {song.Title}  (Müzik\\LiwaPlayer)");
+                    }
+                    else
+                    {
+                        SetStatus($"İndirilemedi: {song.Title}");
+                    }
                 }
             }
             catch (Exception ex)
@@ -1290,6 +1400,43 @@ namespace LiwaPlayer
             {
                 _downloading = false;
             }
+        }
+
+        // İndirilen MP3'ü "İndirilen Şarkılar" listesine yerel bir şarkı olarak
+        // ekler (liste yoksa oluşturulur); dosyadan etiket okumayı dener
+        private async Task AddDownloadedSongToPlaylistAsync(string filePath, Song originalSong)
+        {
+            var target = _playlist.Playlists.FirstOrDefault(p =>
+                string.Equals(p.Name, DownloadedPlaylistName, StringComparison.OrdinalIgnoreCase))
+                ?? _playlist.CreatePlaylist(DownloadedPlaylistName);
+
+            var localSong = new Song
+            {
+                FileName = filePath,
+                Title = originalSong.Title,
+                Artist = originalSong.Artist,
+                Source = SongSource.Local,
+                CoverImage = originalSong.CoverImage
+            };
+
+            try
+            {
+                var (duration, title, artist) = await _player.GetLocalMetadataAsync(filePath);
+
+                localSong.Duration = duration;
+
+                if (!string.IsNullOrWhiteSpace(title))
+                    localSong.Title = title;
+
+                if (!string.IsNullOrWhiteSpace(artist))
+                    localSong.Artist = artist;
+            }
+            catch
+            {
+                // Etiket okunamazsa YouTube'dan gelen başlık/sanatçı adıyla devam
+            }
+
+            _playlist.Add(localSong, target, out _);
         }
 
         private void btnDelete_Click(object sender, RoutedEventArgs e) => RemoveSelectedSong();
@@ -1833,6 +1980,8 @@ namespace LiwaPlayer
             SaveSettings();
             _playlist.Save();
             _player.Dispose();
+            _taskbarButtons?.Dispose();
+            _network.Dispose();
 
             base.OnClosed(e);
         }

@@ -112,8 +112,12 @@ namespace LiwaPlayer.Services
             }
         }
 
-        // Videonun sesini MP3 olarak Müzik\LiwaPlayer klasörüne indirir
-        public async Task<bool> DownloadMp3Async(string videoId, IProgress<int> progress)
+        // Videonun sesini MP3 olarak Müzik\LiwaPlayer klasörüne indirir.
+        // Başarılıysa gerçek dosya yolunu da döndürür (İndirilen Şarkılar
+        // listesine eklemek için) — yt-dlp'nin "[ExtractAudio] Destination: ..."
+        // satırından ayrıştırılır.
+        public async Task<(bool Success, string? FilePath)> DownloadMp3Async(
+            string videoId, IProgress<int> progress)
         {
             Directory.CreateDirectory(MusicFolder);
 
@@ -137,8 +141,11 @@ namespace LiwaPlayer.Services
                 ?? throw new InvalidOperationException("yt-dlp başlatılamadı.");
 
             var progressRegex = new Regex(@"\[download\]\s+([\d\.]+)%");
+            var destinationRegex = new Regex(@"^\[ExtractAudio\] Destination: (.+)$");
 
             var stderrTask = process.StandardError.ReadToEndAsync();
+
+            string? destinationPath = null;
 
             string? line;
             while ((line = await process.StandardOutput.ReadLineAsync()) != null)
@@ -153,6 +160,11 @@ namespace LiwaPlayer.Services
                 {
                     progress.Report((int)percent);
                 }
+
+                var destMatch = destinationRegex.Match(line);
+
+                if (destMatch.Success)
+                    destinationPath = destMatch.Groups[1].Value.Trim();
             }
 
             await process.WaitForExitAsync();
@@ -164,10 +176,10 @@ namespace LiwaPlayer.Services
                 LogService.Write($"yt-dlp hata (kod {process.ExitCode}, {videoId}): " +
                     stderr.Split('\n').LastOrDefault(l => l.Contains("ERROR"))?.Trim());
 
-                return false;
+                return (false, null);
             }
 
-            return true;
+            return (true, destinationPath);
         }
     }
 }
