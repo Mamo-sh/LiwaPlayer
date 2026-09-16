@@ -1447,7 +1447,19 @@ namespace LiwaPlayer
                 // Etiket okunamazsa YouTube'dan gelen başlık/sanatçı adıyla devam
             }
 
-            _playlist.Add(localSong, target, out _);
+            var added = _playlist.Add(localSong, target, out _);
+
+            // İndirilen şarkının nereye gittiği belirsiz kalmasın diye o listeye
+            // otomatik geçilir — kullanıcı elle aramak zorunda kalmaz
+            _playlist.SetActive(target);
+            BindActivePlaylist();
+
+            lstPlaylist.SelectedItem = added;
+            lstPlaylist.ScrollIntoView(added);
+
+            _tray?.ShowBalloonTip(3000, "LiwaPlayer",
+                $"\"{added.Title}\" indirildi ve \"{DownloadedPlaylistName}\" listesine eklendi.",
+                WinForms.ToolTipIcon.Info);
         }
 
         private void btnDelete_Click(object sender, RoutedEventArgs e) => RemoveSelectedSong();

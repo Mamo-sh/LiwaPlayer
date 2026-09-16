@@ -137,6 +137,8 @@ namespace LiwaPlayer.Services
                 StandardOutputEncoding = System.Text.Encoding.UTF8
             };
 
+            var startTime = DateTime.Now;
+
             using var process = Process.Start(psi)
                 ?? throw new InvalidOperationException("yt-dlp başlatılamadı.");
 
@@ -147,43 +149,82 @@ namespace LiwaPlayer.Services
             var destinationRegex = new Regex(
                 @"Destination:\s*(.+\.mp3)\s*$", RegexOptions.IgnoreCase);
 
-            var stderrTask = process.StandardError.ReadToEndAsync();
-
             string? destinationPath = null;
+            var stderrLines = new System.Collections.Generic.List<string>();
 
-            string? line;
-            while ((line = await process.StandardOutput.ReadLineAsync()) != null)
+            // Bazı yt-dlp sürümleri "Destination:" satırını stdout yerine
+            // stderr'e yazıyor; ikisini de eş zamanlı okuyup tarıyoruz,
+            // yoksa dosya diskte olsa bile yol hiç yakalanmıyordu
+            var stdoutTask = Task.Run(async () =>
             {
-                var match = progressRegex.Match(line);
-
-                if (match.Success &&
-                    double.TryParse(match.Groups[1].Value,
-                        System.Globalization.NumberStyles.Float,
-                        System.Globalization.CultureInfo.InvariantCulture,
-                        out double percent))
+                string? line;
+                while ((line = await process.StandardOutput.ReadLineAsync()) != null)
                 {
-                    progress.Report((int)percent);
+                    var match = progressRegex.Match(line);
+
+                    if (match.Success &&
+                        double.TryParse(match.Groups[1].Value,
+                            System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out double percent))
+                    {
+                        progress.Report((int)percent);
+                    }
+
+                    var destMatch = destinationRegex.Match(line);
+
+                    if (destMatch.Success)
+                        destinationPath = destMatch.Groups[1].Value.Trim();
                 }
+            });
 
-                var destMatch = destinationRegex.Match(line);
+            var stderrTask = Task.Run(async () =>
+            {
+                string? line;
+                while ((line = await process.StandardError.ReadLineAsync()) != null)
+                {
+                    stderrLines.Add(line);
 
-                if (destMatch.Success)
-                    destinationPath = destMatch.Groups[1].Value.Trim();
-            }
+                    var destMatch = destinationRegex.Match(line);
 
+                    if (destMatch.Success)
+                        destinationPath ??= destMatch.Groups[1].Value.Trim();
+                }
+            });
+
+            await Task.WhenAll(stdoutTask, stderrTask);
             await process.WaitForExitAsync();
 
             if (process.ExitCode != 0)
             {
-                var stderr = await stderrTask;
-
                 LogService.Write($"yt-dlp hata (kod {process.ExitCode}, {videoId}): " +
-                    stderr.Split('\n').LastOrDefault(l => l.Contains("ERROR"))?.Trim());
+                    stderrLines.LastOrDefault(l => l.Contains("ERROR"))?.Trim());
 
                 return (false, null);
             }
 
+            // Çıktıdan yol yakalanamadıysa (beklenmeyen bir yt-dlp biçimi),
+            // klasördeki en yeni .mp3 dosyasına bakarak güvenlik ağı sağla
+            if (string.IsNullOrWhiteSpace(destinationPath) || !File.Exists(destinationPath))
+                destinationPath = FindNewestMp3Since(startTime);
+
             return (true, destinationPath);
+        }
+
+        private static string? FindNewestMp3Since(DateTime since)
+        {
+            try
+            {
+                return new DirectoryInfo(MusicFolder)
+                    .GetFiles("*.mp3")
+                    .Where(f => f.LastWriteTime >= since.AddSeconds(-2))
+                    .OrderByDescending(f => f.LastWriteTime)
+                    .FirstOrDefault()?.FullName;
+            }
+            catch
+            {
+                return null;
+            }
         }
     }
 }
