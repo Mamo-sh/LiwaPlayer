@@ -14,11 +14,20 @@ namespace LiwaPlayer.Services
     {
         private const string ProbeUrl = "https://www.gstatic.com/generate_204";
 
+        // NetworkChange.NetworkAvailabilityChanged, WPF arayüz iş parçacığında
+        // DEĞİL, .NET'in kendi arka plan iş parçacığında tetiklenir. Bu yüzden
+        // olayları dinleyen taraf (MessageBox, liste güncelleme gibi arayüz
+        // işlemleri yapan MainWindow) her zaman bu Dispatcher üzerinden
+        // çağrılır — aksi halde "yanlış iş parçacığından arayüze erişim"
+        // hatasıyla uygulama anında çöker (tam olarak internet kesintisi anında).
+        private readonly Dispatcher _dispatcher = Dispatcher.CurrentDispatcher;
+
         private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(15) };
         private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(4) };
 
         private bool? _lastKnownOnline;
         private bool _checking;
+        private bool _disposed;
 
         public event Action? ConnectionLost;
         public event Action? ConnectionRestored;
@@ -29,14 +38,24 @@ namespace LiwaPlayer.Services
             _timer.Start();
 
             // Ağ arayüzü durumu değişir değişmez (ör. kablo çekilince) hızlı denetim
-            NetworkChange.NetworkAvailabilityChanged += async (_, _) => await CheckAsync();
+            NetworkChange.NetworkAvailabilityChanged += OnNetworkAvailabilityChanged;
 
             _ = CheckAsync();
         }
 
+        private void OnNetworkAvailabilityChanged(object? sender, NetworkAvailabilityEventArgs e)
+        {
+            // Bu olay arka plan iş parçacığında geliyor; CheckAsync'i (ve
+            // sonundaki olay tetiklemesini) arayüz iş parçacığına taşı
+            if (_disposed)
+                return;
+
+            _dispatcher.BeginInvoke(new Action(async () => await CheckAsync()));
+        }
+
         private async Task CheckAsync()
         {
-            if (_checking)
+            if (_checking || _disposed)
                 return;
 
             _checking = true;
@@ -55,6 +74,9 @@ namespace LiwaPlayer.Services
 
             _checking = false;
 
+            if (_disposed)
+                return;
+
             bool hadPreviousReading = _lastKnownOnline.HasValue;
             bool changed = _lastKnownOnline != online;
 
@@ -64,14 +86,29 @@ namespace LiwaPlayer.Services
             if (!hadPreviousReading || !changed)
                 return;
 
-            if (online)
-                ConnectionRestored?.Invoke();
-            else
-                ConnectionLost?.Invoke();
+            // Olay dinleyicileri (MainWindow) arayüz öğelerine dokunuyor;
+            // CheckAsync hangi iş parçacığında tamamlanırsa tamamlansın
+            // (DispatcherTimer'dan geldiyse zaten arayüz iş parçacığıdır,
+            // NetworkAvailabilityChanged'den geldiyse değildir) tetikleme
+            // her zaman Dispatcher üzerinden, senkron olarak yapılır
+            _dispatcher.Invoke(() =>
+            {
+                if (_disposed)
+                    return;
+
+                if (online)
+                    ConnectionRestored?.Invoke();
+                else
+                    ConnectionLost?.Invoke();
+            });
         }
 
         public void Dispose()
         {
+            _disposed = true;
+
+            NetworkChange.NetworkAvailabilityChanged -= OnNetworkAvailabilityChanged;
+
             _timer.Stop();
             _http.Dispose();
         }
