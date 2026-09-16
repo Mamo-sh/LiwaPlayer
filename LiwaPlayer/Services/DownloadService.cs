@@ -141,7 +141,11 @@ namespace LiwaPlayer.Services
                 ?? throw new InvalidOperationException("yt-dlp başlatılamadı.");
 
             var progressRegex = new Regex(@"\[download\]\s+([\d\.]+)%");
-            var destinationRegex = new Regex(@"^\[ExtractAudio\] Destination: (.+)$");
+
+            // yt-dlp sürümüne göre satır biçimi hafif değişebilir; sadece
+            // ".mp3" ile biten bir "Destination:" satırı arıyoruz, ön ek serbest
+            var destinationRegex = new Regex(
+                @"Destination:\s*(.+\.mp3)\s*$", RegexOptions.IgnoreCase);
 
             var stderrTask = process.StandardError.ReadToEndAsync();
 

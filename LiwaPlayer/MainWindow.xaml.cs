@@ -143,6 +143,9 @@ namespace LiwaPlayer
 
             Loaded += async (_, _) =>
             {
+                // Güncelleme sonrası ilk açılışta bir kez "Yenilikler" göster
+                ShowWhatsNewIfPending();
+
                 // Ana ekranda YouTube ana sayfası gibi öneriler göster
                 await LoadRecommendationsAsync();
 
@@ -315,6 +318,12 @@ namespace LiwaPlayer
                     new Progress<int>(p => SetStatus($"Güncelleme indiriliyor... %{p}")));
 
                 SetStatus("Kurulum başlatılıyor...");
+
+                // Yeniden başlayan yeni sürüm bu notları okuyup "Yenilikler"
+                // penceresinde gösterecek (uygulama temasıyla uyumlu, MessageBox değil)
+                _settings.Current.PendingWhatsNewVersion = update.Version.ToString(3);
+                _settings.Current.PendingWhatsNewNotes = update.Notes;
+                _settings.Save();
 
                 _updater.ApplyUpdate(file);
 
@@ -493,29 +502,31 @@ namespace LiwaPlayer
                     StringComparison.OrdinalIgnoreCase))
                 return; // zaten indirilenler listesindeyiz, tekrar sorma
 
-            var downloaded = _playlist.Playlists.FirstOrDefault(p =>
-                string.Equals(p.Name, DownloadedPlaylistName, StringComparison.OrdinalIgnoreCase));
-
-            if (downloaded == null || downloaded.Songs.Count == 0)
-            {
-                SetStatus("🔌 İnternet bağlantısı yok.");
-                return;
-            }
-
             ShowFromTray();
 
+            // Liste boş olsa bile her zaman sorulur; "hayır" derse veya liste
+            // boşsa durum çubuğunda bilgi verilir, sessizce atlanmaz
             var answer = MessageBox.Show(this,
                 "İnternet bağlantısı yok. İndirilen şarkıları dinlemek ister misiniz?",
                 "Bağlantı Yok",
                 MessageBoxButton.YesNo,
                 MessageBoxImage.Warning);
 
-            if (answer == MessageBoxResult.Yes)
+            if (answer != MessageBoxResult.Yes)
+                return;
+
+            var downloaded = _playlist.Playlists.FirstOrDefault(p =>
+                string.Equals(p.Name, DownloadedPlaylistName, StringComparison.OrdinalIgnoreCase));
+
+            if (downloaded == null || downloaded.Songs.Count == 0)
             {
-                _playlist.SetActive(downloaded);
-                BindActivePlaylist();
-                SetStatus("İndirilen şarkılar listesine geçildi.");
+                SetStatus("Henüz indirilmiş bir şarkın yok.");
+                return;
             }
+
+            _playlist.SetActive(downloaded);
+            BindActivePlaylist();
+            SetStatus("İndirilen şarkılar listesine geçildi.");
         }
 
         private void OnConnectionRestored()
@@ -1565,6 +1576,34 @@ namespace LiwaPlayer
 
         // Uygulama yeniden başlatılmadan hesap bilgilerini/listelerini elle
         // tazelemek için (tepsi menüsü → "YouTube Hesabını Yenile")
+        // Bir önceki çalıştırmada güncelleme uygulandıysa (bkz. CheckForUpdatesAsync)
+        // yeni sürümün notlarını, uygulama temasıyla uyumlu kendi penceremizde
+        // bir kez gösterir. Gösterilir gösterilmez bayrak temizlenir; bir daha çıkmaz.
+        private void ShowWhatsNewIfPending()
+        {
+            var s = _settings.Current;
+
+            if (string.IsNullOrWhiteSpace(s.PendingWhatsNewVersion))
+                return;
+
+            var pendingVersion = s.PendingWhatsNewVersion;
+            var pendingNotes = s.PendingWhatsNewNotes;
+
+            s.PendingWhatsNewVersion = "";
+            s.PendingWhatsNewNotes = "";
+            _settings.Save();
+
+            // Sürüm beklenenle eşleşmiyorsa (ör. güncelleme başka bir şekilde
+            // iptal oldu) yanlış sürüm için "yenilikler" gösterme
+            if (!string.Equals(pendingVersion, UpdateService.CurrentVersion.ToString(3),
+                    StringComparison.OrdinalIgnoreCase))
+                return;
+
+            var window = new WhatsNewWindow(pendingVersion, pendingNotes) { Owner = this };
+
+            window.ShowDialog();
+        }
+
         private async Task RefreshAccountAsync()
         {
             if (!_auth.IsLoggedIn)

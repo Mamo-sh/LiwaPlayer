@@ -54,5 +54,11 @@ namespace LiwaPlayer.Models
         public double WindowLeft { get; set; } = -1;
 
         public double WindowTop { get; set; } = -1;
+
+        // Güncelleme uygulanıp yeniden başlatılınca gösterilecek "Yenilikler"
+        // penceresi için geçici olarak burada tutulur; gösterilince temizlenir
+        public string PendingWhatsNewVersion { get; set; } = "";
+
+        public string PendingWhatsNewNotes { get; set; } = "";
     }
 }

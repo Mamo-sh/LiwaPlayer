@@ -241,7 +241,13 @@ namespace LiwaPlayer
         public int Left, Top, Right, Bottom;
     }
 
-    [StructLayout(LayoutKind.Sequential)]
+    // CharSet=Unicode ŞART: belirtilmezse .NET varsayılan olarak ANSI kullanır,
+    // szTip alanı native WCHAR[260] yerine 260 baytlık ANSI arabelleğe sığar.
+    // Bu hem struct boyutunu küçültüp dizideki 2. ve 3. butonun verisini
+    // kaydırır (sadece ilk buton doğru çalışır) hem de metni yanlış kodlayıp
+    // Windows'un WCHAR olarak okuduğu ANSI baytlarını Çince benzeri karakterlere
+    // dönüştürür.
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     internal struct THUMBBUTTON
     {
         public THBMASK dwMask;
