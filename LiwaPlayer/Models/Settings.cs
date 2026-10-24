@@ -7,15 +7,42 @@ namespace LiwaPlayer.Models
         Dark = 2
     }
 
+    // Tekrar modu: kapalı / liste bitince başa dön / aynı şarkıyı sürekli çal
+    public enum RepeatMode
+    {
+        Off = 0,
+        All = 1,
+        One = 2
+    }
+
     public class Settings
     {
-        // Otomatik: saate göre (08:00-20:00 açık, gerisi koyu)
+        // Otomatik: saate göre (varsayılan 08:00-20:00 açık, gerisi koyu)
         public ThemeMode Theme { get; set; } = ThemeMode.Auto;
+
+        // Otomatik temada açık temanın başladığı ve koyu temanın başladığı an
+        // (gece yarısından itibaren dakika). Varsayılan 08:00 ve 20:00.
+        public int AutoLightStartMinutes { get; set; } = 8 * 60;
+
+        public int AutoDarkStartMinutes { get; set; } = 20 * 60;
+
         public int Volume { get; set; } = 80;
 
         public bool Shuffle { get; set; } = false;
 
+        // Eski ayar dosyalarıyla uyumluluk için duruyor (RepeatMode yoksa buradan okunur)
         public bool Repeat { get; set; } = true;
+
+        // -1: henüz yok (eski ayar dosyası), Repeat alanından türetilir
+        public int RepeatModeValue { get; set; } = -1;
+
+        // ═══ İnternet bağlantısı denetimi ═══
+
+        // Açıkken periyodik olarak gerçek internet erişimi sınanır; kopunca
+        // indirilen şarkıları dinlemek isteyip istemediğin sorulur
+        public bool ConnectionCheckEnabled { get; set; } = true;
+
+        public int ConnectionCheckSeconds { get; set; } = 60;
 
         public string LastSong { get; set; } = "";
 
@@ -29,8 +56,9 @@ namespace LiwaPlayer.Models
         // Kapak resimlerini indir/göster (kapatınca RAM ve bant genişliği azalır)
         public bool ShowThumbnails { get; set; } = true;
 
-        // YouTube akışı ağ önbelleği (ms); takılma olan ağlarda yükseltilir
-        public int NetworkCachingMs { get; set; } = 3000;
+        // YouTube akışı ağ önbelleği (ms): şarkı bu kadar tampon dolunca başlar.
+        // Düşük = şarkı hızlı açılır; takılma/kesilme olan ağlarda yükseltilir
+        public int NetworkCachingMs { get; set; } = 1500;
 
         // Arama sonucu sayısı (azaltmak aramayı hızlandırır)
         public int SearchResultCount { get; set; } = 20;

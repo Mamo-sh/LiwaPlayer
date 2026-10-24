@@ -304,11 +304,13 @@
                             <RadioButton x:Name="rbSearchVideo"
                                          Style="{StaticResource TabButton}"
                                          Content="Video"
-                                         IsChecked="True"/>
+                                         IsChecked="True"
+                                         Checked="rbSearchMode_Checked"/>
                             <RadioButton x:Name="rbSearchMusic"
                                          Style="{StaticResource TabButton}"
                                          Content="Müzik"
-                                         Margin="2,0,0,0"/>
+                                         Margin="2,0,0,0"
+                                         Checked="rbSearchMode_Checked"/>
                             <RadioButton x:Name="rbSearchRadio"
                                          Style="{StaticResource TabButton}"
                                          Content="Radyo"
@@ -560,12 +562,14 @@
                                       ToolTip="Karıştır"
                                       AutomationProperties.Name="Karıştır"/>
 
+                        <!-- Üç durumlu: kapalı → liste tekrarı → tek şarkı tekrarı -->
                         <ToggleButton x:Name="btnRepeat"
                                       Style="{StaticResource ToggleIconButton}"
                                       Content="&#xE8EE;"
                                       Margin="2,0,10,0"
-                                      ToolTip="Liste bitince başa dön"
-                                      AutomationProperties.Name="Liste bitince başa dön"/>
+                                      ToolTip="Tekrar: kapalı"
+                                      AutomationProperties.Name="Tekrar modu"
+                                      Click="btnRepeat_Click"/>
 
                         <TextBlock Text="&#xE767;"
                                    FontFamily="Segoe MDL2 Assets"

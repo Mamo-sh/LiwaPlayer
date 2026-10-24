@@ -1,8 +1,8 @@
 ﻿<Window x:Class="LiwaPlayer.SettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Optimizasyon Ayarları"
-        Height="560"
+        Title="Ayarlar"
+        Height="620"
         Width="480"
         MinHeight="480"
         MinWidth="420"
@@ -34,11 +34,50 @@
                     <RadioButton x:Name="rbThemeLight" Style="{StaticResource TabButton}" Content="Açık" GroupName="theme" Margin="4,0,0,0" Checked="ThemeRadio_Checked"/>
                     <RadioButton x:Name="rbThemeDark" Style="{StaticResource TabButton}" Content="Koyu" GroupName="theme" Margin="4,0,0,0" Checked="ThemeRadio_Checked"/>
                 </StackPanel>
-                <TextBlock Text="Otomatik modda 08:00-20:00 arası açık, gerisi koyu tema kullanılır. Seçim anında uygulanır."
+                <TextBlock Text="Otomatik modda aşağıdaki saatlere göre açık/koyu tema seçilir. Seçim anında uygulanır."
                            Style="{StaticResource MutedText}"
                            FontSize="11"
                            TextWrapping="Wrap"
-                           Margin="0,0,0,16"/>
+                           Margin="0,0,0,10"/>
+
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                    <TextBlock Text="☀ Açık tema başlangıcı"
+                               Foreground="{DynamicResource TextBrush}"
+                               FontSize="13"
+                               VerticalAlignment="Center"
+                               Width="170"/>
+                    <TextBox x:Name="txtLightStart"
+                             Style="{StaticResource SearchBox}"
+                             Width="84"
+                             Padding="4,5"
+                             TextAlignment="Center"
+                             MaxLength="5"
+                             AutomationProperties.Name="Açık tema başlangıç saati"
+                             TextChanged="ThemeTime_TextChanged"/>
+                </StackPanel>
+
+                <StackPanel Orientation="Horizontal" Margin="0,6,0,4">
+                    <TextBlock Text="🌙 Koyu tema başlangıcı"
+                               Foreground="{DynamicResource TextBrush}"
+                               FontSize="13"
+                               VerticalAlignment="Center"
+                               Width="170"/>
+                    <TextBox x:Name="txtDarkStart"
+                             Style="{StaticResource SearchBox}"
+                             Width="84"
+                             Padding="4,5"
+                             TextAlignment="Center"
+                             MaxLength="5"
+                             AutomationProperties.Name="Koyu tema başlangıç saati"
+                             TextChanged="ThemeTime_TextChanged"/>
+                </StackPanel>
+
+                <TextBlock x:Name="txtThemeScheduleHint"
+                           Text="Saat biçimi: SS:DD (ör. 08:00 ve 20:00). Gece yarısını aşan aralıklar da olur."
+                           Style="{StaticResource MutedText}"
+                           FontSize="11"
+                           TextWrapping="Wrap"
+                           Margin="0,2,0,16"/>
 
                 <Border Height="1" Background="{DynamicResource LineBrush}" Margin="0,0,0,14"/>
 
@@ -96,10 +135,15 @@
                            FontSize="13"
                            Margin="0,0,0,6"/>
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
-                    <RadioButton x:Name="rbCacheLow" Style="{StaticResource TabButton}" Content="Düşük (1 sn)" GroupName="cache"/>
-                    <RadioButton x:Name="rbCacheNormal" Style="{StaticResource TabButton}" Content="Normal (3 sn)" GroupName="cache" Margin="4,0,0,0"/>
-                    <RadioButton x:Name="rbCacheHigh" Style="{StaticResource TabButton}" Content="Yüksek (8 sn)" GroupName="cache" Margin="4,0,0,0"/>
+                    <RadioButton x:Name="rbCacheLow" Style="{StaticResource TabButton}" Content="Düşük (0,8 sn)" GroupName="cache"/>
+                    <RadioButton x:Name="rbCacheNormal" Style="{StaticResource TabButton}" Content="Normal (1,5 sn)" GroupName="cache" Margin="4,0,0,0"/>
+                    <RadioButton x:Name="rbCacheHigh" Style="{StaticResource TabButton}" Content="Yüksek (6 sn)" GroupName="cache" Margin="4,0,0,0"/>
                 </StackPanel>
+                <TextBlock Text="Şarkı, bu kadar tampon dolunca başlar: düşük değer şarkıyı hızlı açar, yüksek değer zayıf internette kesintiyi azaltır."
+                           Style="{StaticResource MutedText}"
+                           FontSize="11"
+                           TextWrapping="Wrap"
+                           Margin="0,-10,0,16"/>
 
                 <Border Height="1" Background="{DynamicResource LineBrush}" Margin="0,0,0,14"/>
 
@@ -117,6 +161,36 @@
                            FontSize="11"
                            TextWrapping="Wrap"
                            Margin="27,0,0,16"/>
+
+                <Border Height="1" Background="{DynamicResource LineBrush}" Margin="0,0,0,14"/>
+
+                <!-- ═══ Bağlantı ═══ -->
+                <TextBlock Text="🌐 İnternet Bağlantısı"
+                           Style="{StaticResource PanelTitle}"
+                           Margin="0,0,0,10"/>
+
+                <CheckBox x:Name="chkConnectionCheck"
+                          Style="{StaticResource DarkCheckBox}"
+                          Content="İnternet bağlantısını düzenli denetle"
+                          Margin="0,0,0,4"
+                          Checked="ConnectionCheck_Changed"
+                          Unchecked="ConnectionCheck_Changed"/>
+                <TextBlock Text="Bağlantı kopunca indirilen şarkıları dinlemek isteyip istemediğin sorulur. Kapatırsan hiç denetlenmez ve soru çıkmaz."
+                           Style="{StaticResource MutedText}"
+                           FontSize="11"
+                           TextWrapping="Wrap"
+                           Margin="27,0,0,10"/>
+
+                <TextBlock Text="Denetim sıklığı"
+                           Foreground="{DynamicResource TextBrush}"
+                           FontSize="13"
+                           Margin="0,0,0,6"/>
+                <StackPanel x:Name="panelConnectionInterval" Orientation="Horizontal" Margin="0,0,0,16">
+                    <RadioButton x:Name="rbCheck30" Style="{StaticResource TabButton}" Content="30 sn" GroupName="checkInterval"/>
+                    <RadioButton x:Name="rbCheck60" Style="{StaticResource TabButton}" Content="1 dk" GroupName="checkInterval" Margin="4,0,0,0"/>
+                    <RadioButton x:Name="rbCheck120" Style="{StaticResource TabButton}" Content="2 dk" GroupName="checkInterval" Margin="4,0,0,0"/>
+                    <RadioButton x:Name="rbCheck300" Style="{StaticResource TabButton}" Content="5 dk" GroupName="checkInterval" Margin="4,0,0,0"/>
+                </StackPanel>
 
                 <Border Height="1" Background="{DynamicResource LineBrush}" Margin="0,0,0,14"/>
 

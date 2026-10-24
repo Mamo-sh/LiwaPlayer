@@ -12,6 +12,19 @@ namespace LiwaPlayer.Services
 
         static AppPaths()
         {
+            // LIWAPLAYER_DATA ortam değişkeni verilmişse veri o klasörde tutulur.
+            // Gerçek kullanıcı verisine dokunmadan deneme/test yapmak ve uygulamayı
+            // taşınabilir (USB) kullanmak için; verilmezse normal LocalAppData yolu.
+            var custom = Environment.GetEnvironmentVariable("LIWAPLAYER_DATA");
+
+            if (!string.IsNullOrWhiteSpace(custom))
+            {
+                DataFolder = Path.GetFullPath(custom);
+
+                Directory.CreateDirectory(DataFolder);
+                return;
+            }
+
             DataFolder = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "LiwaPlayer",

@@ -107,6 +107,17 @@ namespace LiwaPlayer.Services
         {
             _mediaPlayer.Stop();
 
+            // MediaPlayer durdurulan medyayı kendi içinde tutmaya devam eder.
+            // Bırakılmazsa listeden silinen/geçilen şarkı "Oynat"a basınca
+            // (HasMedia hâlâ true olduğu için) yeniden çalar
+            try
+            {
+                _mediaPlayer.Media = null;
+            }
+            catch
+            {
+            }
+
             _currentMedia?.Dispose();
             _currentMedia = null;
         }

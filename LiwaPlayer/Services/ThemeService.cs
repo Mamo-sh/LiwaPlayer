@@ -9,7 +9,7 @@ namespace LiwaPlayer.Services
 {
     // Uygulama genelindeki 10 tema rengini (App.xaml'deki DynamicResource
     // fırçaları) çalışma zamanında değiştirir. Otomatik modda saate göre
-    // (08:00-20:00 açık, gerisi koyu) seçilir.
+    // (Ayarlar'daki açık/koyu başlangıç saatlerine göre) seçilir.
     public static class ThemeService
     {
         private static readonly Dictionary<string, Color> DarkPalette = new()
@@ -40,13 +40,32 @@ namespace LiwaPlayer.Services
             ["TrackBrush"] = Color.FromRgb(0xD9, 0xD9, 0xE2),
         };
 
-        // Otomatik modda gündüz sayılan saat aralığı
-        private const int DayStartHour = 8;
-        private const int DayEndHour = 20;
+        // Otomatik modda açık temanın ve koyu temanın başladığı an (gece
+        // yarısından itibaren dakika). Ayarlar'dan gelir; varsayılan 08:00-20:00.
+        // Koyu başlangıç açık başlangıçtan önceyse aralık gece yarısını aşar
+        // (ör. açık 06:00, koyu 02:00 → 06:00-24:00 ile 00:00-02:00 açık).
+        private static int _lightStartMinutes = 8 * 60;
+        private static int _darkStartMinutes = 20 * 60;
 
         public static bool IsDarkActive { get; private set; } = true;
 
-        public static bool IsDayTime(DateTime now) => now.Hour >= DayStartHour && now.Hour < DayEndHour;
+        public static void SetSchedule(int lightStartMinutes, int darkStartMinutes)
+        {
+            _lightStartMinutes = Math.Clamp(lightStartMinutes, 0, 1439);
+            _darkStartMinutes = Math.Clamp(darkStartMinutes, 0, 1439);
+        }
+
+        public static bool IsDayTime(DateTime now)
+        {
+            int minute = now.Hour * 60 + now.Minute;
+
+            if (_lightStartMinutes == _darkStartMinutes)
+                return false;
+
+            return _lightStartMinutes < _darkStartMinutes
+                ? minute >= _lightStartMinutes && minute < _darkStartMinutes
+                : minute >= _lightStartMinutes || minute < _darkStartMinutes;
+        }
 
         // Etkin (görünen) modu hesaplar: Auto ise saate bakar
         public static bool ResolveIsDark(ThemeMode mode) => mode switch
@@ -55,6 +74,16 @@ namespace LiwaPlayer.Services
             ThemeMode.Dark => true,
             _ => !IsDayTime(DateTime.Now)
         };
+
+        // Periyodik denetim için: görünüm gerçekten değişecekse uygular, yoksa
+        // renkleri boş yere yeniden yazıp arayüzü yeniden çizdirmez
+        public static void RefreshAuto()
+        {
+            bool dark = ResolveIsDark(ThemeMode.Auto);
+
+            if (dark != IsDarkActive)
+                Apply(dark);
+        }
 
         public static void Apply(ThemeMode mode)
         {

@@ -7,12 +7,23 @@ using System.Windows.Threading;
 namespace LiwaPlayer.Services
 {
     // Gerçek internet erişimini (sadece ağ kartının "bağlı" görünmesini değil)
-    // periyodik olarak Google'ın bağlantı denetim uç noktasına küçük bir istek
-    // atarak kontrol eder. Durum DEĞİŞTİĞİNDE (çevrimdışı <-> çevrimiçi) olay
-    // tetiklenir; her denetimde değil.
+    // periyodik olarak küçük bir istek atarak kontrol eder. Durum DEĞİŞTİĞİNDE
+    // (çevrimdışı <-> çevrimiçi) olay tetiklenir; her denetimde değil.
+    //
+    // Aralık ve açık/kapalı durumu Ayarlar'dan gelir (Configure).
+    //
+    // Yanlış alarmı azaltmak için "çevrimdışı" kararı tek bir başarısız isteğe
+    // bağlanmaz: iki farklı adres sınanır ve hepsi başarısız olursa birkaç
+    // saniye sonra bir kez daha denenir. Yalnızca o zaman bağlantı kopmuş sayılır.
     public class NetworkMonitorService : IDisposable
     {
-        private const string ProbeUrl = "https://www.gstatic.com/generate_204";
+        // Birincisi Google'ın genel bağlantı denetimi, ikincisi uygulamanın
+        // asıl ihtiyaç duyduğu YouTube. İkisinden biri yanıtlıyorsa internet vardır.
+        private static readonly string[] ProbeUrls =
+        {
+            "https://www.gstatic.com/generate_204",
+            "https://www.youtube.com/generate_204"
+        };
 
         // NetworkChange.NetworkAvailabilityChanged, WPF arayüz iş parçacığında
         // DEĞİL, .NET'in kendi arka plan iş parçacığında tetiklenir. Bu yüzden
@@ -22,11 +33,12 @@ namespace LiwaPlayer.Services
         // hatasıyla uygulama anında çöker (tam olarak internet kesintisi anında).
         private readonly Dispatcher _dispatcher = Dispatcher.CurrentDispatcher;
 
-        private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(15) };
-        private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(4) };
+        private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(60) };
+        private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(5) };
 
         private bool? _lastKnownOnline;
         private bool _checking;
+        private bool _enabled;
         private bool _disposed;
 
         public event Action? ConnectionLost;
@@ -35,27 +47,67 @@ namespace LiwaPlayer.Services
         public NetworkMonitorService()
         {
             _timer.Tick += async (_, _) => await CheckAsync();
-            _timer.Start();
 
             // Ağ arayüzü durumu değişir değişmez (ör. kablo çekilince) hızlı denetim
             NetworkChange.NetworkAvailabilityChanged += OnNetworkAvailabilityChanged;
+        }
 
-            _ = CheckAsync();
+        // Ayarlar'dan gelen değerleri uygular; çalışırken de çağrılabilir
+        public void Configure(bool enabled, int intervalSeconds)
+        {
+            bool wasEnabled = _enabled;
+
+            _enabled = enabled;
+
+            _timer.Stop();
+
+            if (!enabled)
+            {
+                // Kapatılınca bir sonraki açılışta yeni bir başlangıç ölçümü alınır
+                _lastKnownOnline = null;
+                return;
+            }
+
+            _timer.Interval = TimeSpan.FromSeconds(Math.Clamp(intervalSeconds, 15, 3600));
+            _timer.Start();
+
+            if (!wasEnabled)
+                _ = CheckAsync();
         }
 
         private void OnNetworkAvailabilityChanged(object? sender, NetworkAvailabilityEventArgs e)
         {
             // Bu olay arka plan iş parçacığında geliyor; CheckAsync'i (ve
             // sonundaki olay tetiklemesini) arayüz iş parçacığına taşı
-            if (_disposed)
+            if (_disposed || !_enabled)
                 return;
 
             _dispatcher.BeginInvoke(new Action(async () => await CheckAsync()));
         }
 
+        private async Task<bool> ProbeOnceAsync()
+        {
+            foreach (var url in ProbeUrls)
+            {
+                try
+                {
+                    using var response = await _http.GetAsync(url);
+
+                    if (response.IsSuccessStatusCode || (int)response.StatusCode == 204)
+                        return true;
+                }
+                catch
+                {
+                    // Bu adres yanıt vermedi; diğerini dene
+                }
+            }
+
+            return false;
+        }
+
         private async Task CheckAsync()
         {
-            if (_checking || _disposed)
+            if (_checking || _disposed || !_enabled)
                 return;
 
             _checking = true;
@@ -64,17 +116,22 @@ namespace LiwaPlayer.Services
 
             try
             {
-                using var response = await _http.GetAsync(ProbeUrl);
-                online = response.IsSuccessStatusCode || (int)response.StatusCode == 204;
+                online = await ProbeOnceAsync();
+
+                // Kısa süreli bir takılmayı "internet yok" sayma: bir kez daha dene
+                if (!online)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(3));
+                    online = await ProbeOnceAsync();
+                }
             }
-            catch
+            finally
             {
-                online = false;
+                _checking = false;
             }
 
-            _checking = false;
-
-            if (_disposed)
+            // Denetim sürerken kapatıldıysa sonucu yok say
+            if (_disposed || !_enabled)
                 return;
 
             bool hadPreviousReading = _lastKnownOnline.HasValue;
@@ -93,7 +150,7 @@ namespace LiwaPlayer.Services
             // her zaman Dispatcher üzerinden, senkron olarak yapılır
             _dispatcher.Invoke(() =>
             {
-                if (_disposed)
+                if (_disposed || !_enabled)
                     return;
 
                 if (online)

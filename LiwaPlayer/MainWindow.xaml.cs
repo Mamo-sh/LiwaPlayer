@@ -37,8 +37,23 @@ namespace LiwaPlayer
         private ObservableCollection<Song>? _boundSongs;
 
         // Aynı anda iki şarkı yüklenmesin diye: yeni bir çalma isteği
-        // geldiğinde eski YouTube URL çözümlemesi geçersiz sayılır
+        // geldiğinde eski YouTube URL çözümlemesi geçersiz sayılır. Şarkı silinip
+        // çalma durdurulduğunda da artırılır ki çözümlenmekte olan şarkı sonradan başlamasın.
         private long _playToken;
+
+        // Tekrar modu: kapalı / liste / tek şarkı
+        private RepeatMode _repeatMode = RepeatMode.All;
+
+        // Şarkı başlar başlamaz sıradaki şarkı seçilir ve YouTube adresi arka
+        // planda çözülür; "Sonraki"ye basınca/şarkı bitince beklemeden başlar
+        private Song? _plannedNext;
+        private bool _plannedForShuffle;
+
+        // Tek şarkı tekrarında, hemen biten (bozuk akış) şarkıyı sonsuz döngüye sokmamak için
+        private DateTime _playStartedAtUtc = DateTime.MinValue;
+
+        // Radyo sekmesinde arama kutusuna kendiliğinden yazılan sorgu
+        private const string AutoRadioQuery = "canlı radyo";
 
         // Sistem tepsisi: müzik çalarken pencere kapatılırsa uygulama
         // kapanmaz, tepsiye küçülür ve çalmaya devam eder
@@ -62,7 +77,9 @@ namespace LiwaPlayer
         private readonly DispatcherTimer _memoryGuard = new() { Interval = TimeSpan.FromSeconds(15) };
 
         // Otomatik tema modunda gündüz/gece geçişini yakalamak için periyodik denetim
-        private readonly DispatcherTimer _themeTimer = new() { Interval = TimeSpan.FromMinutes(10) };
+        // (saatler dakika hassasiyetinde ayarlanabildiği için dakikada bir bakılır;
+        // görünüm değişmiyorsa hiçbir şey yeniden çizilmez)
+        private readonly DispatcherTimer _themeTimer = new() { Interval = TimeSpan.FromMinutes(1) };
 
         // Pencere başlığında ve üst çubukta gösterilen sabit sürüm etiketi
         private readonly string _baseTitle = "LiwaPlayer v" + UpdateService.CurrentVersion.ToString(3);
@@ -104,7 +121,7 @@ namespace LiwaPlayer
             _themeTimer.Tick += (_, _) =>
             {
                 if (_settings.Current.Theme == ThemeMode.Auto)
-                    ThemeService.Apply(ThemeMode.Auto);
+                    ThemeService.RefreshAuto();
             };
             _themeTimer.Start();
 
@@ -123,7 +140,15 @@ namespace LiwaPlayer
                 Dispatcher.BeginInvoke(new Action(OnPlaybackEnded));
 
             _player.EncounteredError += (_, _) =>
-                Dispatcher.BeginInvoke(new Action(() => SetStatus("Çalma hatası oluştu.")));
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    // Önbellekteki adres erken geçersiz olmuş olabilir; bir dahaki
+                    // denemede taze adres çözülsün
+                    if (_playlist.CurrentSong is { Source: SongSource.YouTube } current)
+                        _youtube.InvalidateAudioUrl(current.FileName);
+
+                    SetStatus("Çalma hatası oluştu.");
+                }));
 
             sliderPosition.PreviewMouseDown += (_, _) => _draggingSlider = true;
 
@@ -169,7 +194,11 @@ namespace LiwaPlayer
 
             _player.NetworkCachingMs = Math.Clamp(s.NetworkCachingMs, 500, 15000);
             YouTubeService.LoadThumbnails = s.ShowThumbnails;
+
+            ThemeService.SetSchedule(s.AutoLightStartMinutes, s.AutoDarkStartMinutes);
             ThemeService.Apply(s.Theme);
+
+            _network.Configure(s.ConnectionCheckEnabled, s.ConnectionCheckSeconds);
         }
 
         private void btnSettings_Click(object sender, RoutedEventArgs e)
@@ -346,7 +375,7 @@ namespace LiwaPlayer
 
             sliderVolume.Value = Math.Clamp(s.Volume, 0, 100);
             btnShuffle.IsChecked = s.Shuffle;
-            btnRepeat.IsChecked = s.Repeat;
+            SetRepeatMode((RepeatMode)Math.Clamp(s.RepeatModeValue, 0, 2));
 
             // Kayıtlı arayüz ölçeğini uygula (pencere boyutu zaten o ölçekle kaydedildi)
             ApplyUiScale(s.UiScale, resizeWindow: false, announce: false);
@@ -464,6 +493,13 @@ namespace LiwaPlayer
 
             _tray.DoubleClick += (_, _) => ShowFromTray();
 
+            // "İnternet yok" balonuna tıklanırsa bekleyen soru sorulur
+            _tray.BalloonTipClicked += (_, _) =>
+            {
+                if (_offlinePromptPending)
+                    OfferDownloadedPlaylist();
+            };
+
             var menu = new WinForms.ContextMenuStrip();
 
             menu.Items.Add("Göster", null, (_, _) => ShowFromTray());
@@ -496,11 +532,33 @@ namespace LiwaPlayer
 
         // ═══════════════ İnternet bağlantısı ═══════════════
 
+        // Pencere tepsideyken bağlantı koptuysa soru bekletilir (pencere öne fırlayıp
+        // odağı çalmaz); kullanıcı balona tıklayınca ya da pencereyi açınca sorulur
+        private bool _offlinePromptPending;
+
         private void OnConnectionLost()
         {
             if (string.Equals(_playlist.ActivePlaylist.Name, DownloadedPlaylistName,
                     StringComparison.OrdinalIgnoreCase))
                 return; // zaten indirilenler listesindeyiz, tekrar sorma
+
+            if (!IsVisible)
+            {
+                _offlinePromptPending = true;
+
+                _tray?.ShowBalloonTip(5000, "LiwaPlayer",
+                    "İnternet bağlantısı yok. İndirilen şarkıları dinlemek için buraya tıklayın.",
+                    WinForms.ToolTipIcon.Warning);
+
+                return;
+            }
+
+            OfferDownloadedPlaylist();
+        }
+
+        private void OfferDownloadedPlaylist()
+        {
+            _offlinePromptPending = false;
 
             ShowFromTray();
 
@@ -531,6 +589,9 @@ namespace LiwaPlayer
 
         private void OnConnectionRestored()
         {
+            // Bağlantı geri geldi: bekleyen "indirilenleri dinle" sorusu geçersiz
+            _offlinePromptPending = false;
+
             // Kullanıcı çevrimdışıyken indirilenler listesine geçmediyse
             // (soruyu reddetti veya sorulmadı), geri alacak bir şey yok
             if (!string.Equals(_playlist.ActivePlaylist.Name, DownloadedPlaylistName,
@@ -640,7 +701,13 @@ namespace LiwaPlayer
 
             // Yönetici penceresinde listeler silinmiş/değişmiş olabilir
             if (_playbackPlaylist != null && !_playlist.Playlists.Contains(_playbackPlaylist))
+            {
                 _playbackPlaylist = null;
+
+                // Çalan şarkının listesi silindiyse şarkı da çalmaya devam etmesin
+                if (_playlist.CurrentSong == null)
+                    StopPlayback();
+            }
 
             BindActivePlaylist();
         }
@@ -886,6 +953,17 @@ namespace LiwaPlayer
 
             _playlist.SetCurrent(song);
 
+            // Önceki şarkı, yenisi hazır olana kadar çalmaya devam etmesin:
+            // altta yeni şarkının adı yazarken eskisinin sesi gelmesi tutarsız
+            _player.Stop();
+            sliderPosition.Value = 0;
+            txtCurrent.Text = "00:00";
+            txtDuration.Text = song.IsLive ? "🔴" : song.DurationText;
+
+            // Seçilen şarkı bu arada listeden silindiyse ya da başka bir şarkı
+            // seçildiyse çözümlenen akış çalınmamalı
+            bool IsStale() => token != _playToken || _playlist.CurrentSong != song;
+
             if (_boundSongs != null && _boundSongs.Contains(song))
             {
                 lstPlaylist.SelectedItem = song;
@@ -918,10 +996,11 @@ namespace LiwaPlayer
                     SetStatus("🔴 Canlı yayına bağlanılıyor...");
                     location = await _youtube.GetLiveStreamUrlAsync(song.FileName);
 
-                    if (token != _playToken)
+                    if (IsStale())
                         return;
 
                     _player.Play(location, withVideo: wantVideo);
+                    _playStartedAtUtc = DateTime.UtcNow;
                     SetStatus("🔴 Canlı yayın çalınıyor");
 
                     _settings.Current.LastSong = song.Id.ToString();
@@ -933,10 +1012,11 @@ namespace LiwaPlayer
                     SetStatus("Klip hazırlanıyor...");
                     var (videoUrl, audioUrl) = await _youtube.GetVideoStreamsAsync(song.FileName);
 
-                    if (token != _playToken)
+                    if (IsStale())
                         return;
 
                     _player.PlayWithSlaveAudio(videoUrl, audioUrl);
+                    _playStartedAtUtc = DateTime.UtcNow;
                     SetStatus("Klip oynatılıyor");
 
                     _settings.Current.LastSong = song.Id.ToString();
@@ -948,8 +1028,8 @@ namespace LiwaPlayer
                     SetStatus("YouTube akışı hazırlanıyor...");
                     location = await _youtube.GetAudioStreamUrlAsync(song.FileName);
 
-                    // Bekleme sırasında başka şarkı seçildiyse bunu çalma
-                    if (token != _playToken)
+                    // Bekleme sırasında başka şarkı seçildiyse ya da bu şarkı silindiyse çalma
+                    if (IsStale())
                         return;
                 }
                 else
@@ -964,18 +1044,22 @@ namespace LiwaPlayer
                 }
 
                 _player.Play(location);
+                _playStartedAtUtc = DateTime.UtcNow;
 
                 SetStatus(song.Source == SongSource.YouTube
                     ? "YouTube üzerinden çalınıyor"
                     : "Yerel dosyadan çalınıyor");
 
                 _settings.Current.LastSong = song.Id.ToString();
+
+                // Şarkı başladı: sıradakini seç ve adresini arka planda çöz
+                PlanNextAndPrefetch(CurrentPlaybackPlaylist);
             }
             catch (Exception ex)
             {
                 LogService.Write($"Çalma hatası ({song.Title})", ex);
 
-                if (token != _playToken)
+                if (IsStale())
                     return;
 
                 // YouTube bazı makinelere/IP'lere bot doğrulaması dayatır ve tüm
@@ -998,9 +1082,9 @@ namespace LiwaPlayer
                 ? _playbackPlaylist
                 : _playlist.ActivePlaylist;
 
-        private Song? GetNextSong()
+        // Sıradaki şarkıyı seçer (karıştırma açıksa rastgele)
+        private Song? PickNextSong(Playlist playlist)
         {
-            var playlist = CurrentPlaybackPlaylist;
             var songs = playlist.Songs;
 
             if (songs.Count == 0)
@@ -1018,6 +1102,96 @@ namespace LiwaPlayer
             }
 
             return _playlist.Next(playlist);
+        }
+
+        private Song? GetNextSong()
+        {
+            var playlist = CurrentPlaybackPlaylist;
+
+            // Önceden seçilip adresi çözülmüş sıradaki şarkı varsa onu kullan
+            // (karıştırmada da hazırlanan şarkının çalması için)
+            bool shuffle = btnShuffle.IsChecked == true;
+
+            if (_plannedNext != null &&
+                _plannedForShuffle == shuffle &&
+                _plannedNext != _playlist.CurrentSong &&
+                playlist.Songs.Contains(_plannedNext))
+                return _plannedNext;
+
+            return PickNextSong(playlist);
+        }
+
+        // Çalan şarkıdan sonra gelecek şarkıyı belirler ve YouTube ise akış
+        // adresini arka planda önceden çözer; şarkı geçişindeki bekleme
+        // (1-3 sn) böylece kalkar
+        private void PlanNextAndPrefetch(Playlist playlist)
+        {
+            _plannedForShuffle = btnShuffle.IsChecked == true;
+            _plannedNext = PickNextSong(playlist);
+
+            if (_plannedNext is { Source: SongSource.YouTube, IsLive: false } next)
+                _youtube.PrefetchAudio(next.FileName);
+        }
+
+        // Çalan şarkıyı hemen durdurur, arayüzü sıfırlar ve çözümlenmekte olan
+        // (henüz başlamamış) çalma isteklerini de iptal eder. Çalan şarkı silinince
+        // ya da listesi temizlenince kullanılır — aksi halde çözümlenmesi biten
+        // akış silinmiş şarkıyı yine de başlatırdı.
+        private void StopPlayback()
+        {
+            _playToken++;
+            _plannedNext = null;
+
+            _player.Stop();
+
+            sliderPosition.Value = 0;
+            txtCurrent.Text = "00:00";
+            txtDuration.Text = "00:00";
+
+            txtSong.Text = "Şarkı seçilmedi";
+            Title = _baseTitle;
+
+            SetCoverImage("");
+            _visualizer?.UpdateSong("", "", "");
+
+            if (_tray != null)
+                _tray.Text = _baseTitle.Length > 63 ? _baseTitle[..60] + "..." : _baseTitle;
+        }
+
+        // ═══════════════ Tekrar modu ═══════════════
+
+        private void btnRepeat_Click(object sender, RoutedEventArgs e)
+        {
+            SetRepeatMode(_repeatMode switch
+            {
+                RepeatMode.Off => RepeatMode.All,
+                RepeatMode.All => RepeatMode.One,
+                _ => RepeatMode.Off
+            }, announce: true);
+        }
+
+        private void SetRepeatMode(RepeatMode mode, bool announce = false)
+        {
+            _repeatMode = mode;
+
+            // ToggleButton tıklamada kendiliğinden döner; üç durumu biz yönetiyoruz
+            btnRepeat.IsChecked = mode != RepeatMode.Off;
+
+            // E8ED = "tek şarkı tekrarı", E8EE = "liste tekrarı" (Segoe MDL2)
+            btnRepeat.Content = mode == RepeatMode.One ? "" : "";
+
+            var text = mode switch
+            {
+                RepeatMode.All => "Tekrar: liste bitince başa dön",
+                RepeatMode.One => "Tekrar: aynı şarkıyı sürekli çal",
+                _ => "Tekrar: kapalı"
+            };
+
+            btnRepeat.ToolTip = text;
+            AutomationProperties.SetName(btnRepeat, text);
+
+            if (announce)
+                SetStatus(text);
         }
 
         private void OnPlaybackEnded()
@@ -1039,8 +1213,24 @@ namespace LiwaPlayer
             if (songs.Count == 0)
                 return;
 
+            // Aynı şarkıyı sürekli çal: bitince yeniden başlat. Adres önbellekte
+            // olduğundan ağa gitmeden hemen başlar.
+            if (_repeatMode == RepeatMode.One)
+            {
+                // Şarkı daha başlar başlamaz bittiyse (bozuk/süresi dolmuş akış)
+                // sonsuz döngüye girip YouTube'u yormasın
+                if (DateTime.UtcNow - _playStartedAtUtc < TimeSpan.FromSeconds(3))
+                {
+                    SetStatus("Şarkı tekrarlanamadı (akış hemen sona erdi).");
+                    return;
+                }
+
+                PlaySong(_playlist.CurrentSong, playlist);
+                return;
+            }
+
             bool shuffle = btnShuffle.IsChecked == true;
-            bool repeat = btnRepeat.IsChecked == true;
+            bool repeat = _repeatMode == RepeatMode.All;
             bool isLast = songs.IndexOf(_playlist.CurrentSong) == songs.Count - 1;
 
             if (!shuffle && !repeat && isLast)
@@ -1476,12 +1666,9 @@ namespace LiwaPlayer
 
             _playlist.RemoveFromActive(song);
 
+            // Çalan (ya da çalmak üzere akışı çözülen) şarkı silindiyse durdur
             if (wasCurrent)
-            {
-                _player.Stop();
-                txtSong.Text = "Şarkı seçilmedi";
-                sliderPosition.Value = 0;
-            }
+                StopPlayback();
 
             SetStatus("Şarkı listeden çıkarıldı.");
         }
@@ -1509,11 +1696,7 @@ namespace LiwaPlayer
             _playlist.ClearActive();
 
             if (currentWasHere)
-            {
-                _player.Stop();
-                txtSong.Text = "Şarkı seçilmedi";
-                sliderPosition.Value = 0;
-            }
+                StopPlayback();
 
             SetStatus($"\"{active.Name}\" listesi temizlendi.");
         }
@@ -1760,17 +1943,51 @@ namespace LiwaPlayer
                 SearchYouTubeAsync();
         }
 
-        // Radyo sekmesine geçilince kutu boşsa hazır kanallar listelensin
+        // Radyo sekmesine geçilince kutu boşsa hazır kanallar listelensin;
+        // kullanıcı kendi sorgusunu yazmışsa o sorgu radyo filtresiyle yeniden aranır
         private void rbSearchRadio_Checked(object sender, RoutedEventArgs e)
         {
-            if (txtSearch == null || btnSearch == null)
+            if (!IsLoaded)
                 return;
 
             if (string.IsNullOrWhiteSpace(txtSearch.Text))
+                txtSearch.Text = AutoRadioQuery;
+
+            RunSearchIfNotImport();
+        }
+
+        // Video/Müzik sekmesine geçilince: radyo için kendiliğinden yazılan
+        // "canlı radyo" metni silinir ve öneriler geri gelir (elle silmek gerekmesin);
+        // kullanıcının kendi yazdığı sorgu ise yeni modda yeniden aranır
+        private async void rbSearchMode_Checked(object sender, RoutedEventArgs e)
+        {
+            if (!IsLoaded)
+                return;
+
+            var text = txtSearch.Text.Trim();
+
+            if (text.Length == 0 ||
+                string.Equals(text, AutoRadioQuery, StringComparison.OrdinalIgnoreCase))
             {
-                txtSearch.Text = "canlı radyo";
-                SearchYouTubeAsync();
+                txtSearch.Clear();
+
+                lstResults.ItemsSource = null;
+                txtRecoTitle.Visibility = Visibility.Collapsed;
+                txtSearchHint.Text = "Şarkı veya sanatçı adı yazıp Enter'a basın.";
+                txtSearchHint.Visibility = Visibility.Visible;
+
+                await LoadRecommendationsAsync();
+                return;
             }
+
+            RunSearchIfNotImport();
+        }
+
+        // Liste bağlantısı yapıştırılmışsa mod değişince yeniden içe aktarma yapılmasın
+        private void RunSearchIfNotImport()
+        {
+            if (!txtSearch.Text.Contains("list=", StringComparison.OrdinalIgnoreCase))
+                SearchYouTubeAsync();
         }
 
         private void btnSearch_Click(object sender, RoutedEventArgs e) => SearchYouTubeAsync();
@@ -2003,7 +2220,8 @@ namespace LiwaPlayer
 
             s.Volume = (int)sliderVolume.Value;
             s.Shuffle = btnShuffle.IsChecked == true;
-            s.Repeat = btnRepeat.IsChecked == true;
+            s.RepeatModeValue = (int)_repeatMode;
+            s.Repeat = _repeatMode != RepeatMode.Off;
             s.ActivePlaylistId = _playlist.ActivePlaylist.Id.ToString();
 
             if (WindowState == WindowState.Normal)
@@ -2020,6 +2238,8 @@ namespace LiwaPlayer
         protected override void OnClosed(EventArgs e)
         {
             _timer.Stop();
+            _themeTimer.Stop();
+            _memoryGuard.Stop();
 
             if (_tray != null)
             {

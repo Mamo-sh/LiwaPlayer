@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
@@ -75,6 +76,9 @@ namespace LiwaPlayer.Services
             _authClient = cookies is { Count: > 0 }
                 ? new YoutubeClient(cookies)
                 : null;
+
+            // Hesap değişince eski istemciyle çözülmüş adresler güvenilmez
+            _audioUrlCache.Clear();
         }
 
         // ═══════════ Normal YouTube araması ═══════════
@@ -703,10 +707,96 @@ namespace LiwaPlayer.Services
 
         // ═══════════ Akış çözümleme ═══════════
 
+        // Çözülmüş ses akışı adresleri bellekte tutulur: bir şarkıyı tekrar
+        // çalmak (tekrar modu, geri gitmek) ve sıradaki şarkıyı önceden
+        // çözmek (prefetch) şarkı açılış süresini sıfıra yaklaştırır.
+        // Adresler YouTube tarafında ~6 saat geçerlidir ("expire=" parametresi).
+        private readonly ConcurrentDictionary<string, (string Url, DateTime ExpiresUtc)> _audioUrlCache = new();
+        private readonly ConcurrentDictionary<string, Task<string>> _audioUrlPending = new();
+
+        private const int AudioUrlCacheLimit = 60;
+
         // Video indirilmez; sadece ses akışının URL'si çözülür ve LibVLC'ye verilir.
+        // Aynı şarkı için aynı anda yapılan çağrılar tek çözümlemeyi paylaşır.
+        public Task<string> GetAudioStreamUrlAsync(string videoId)
+        {
+            if (_audioUrlCache.TryGetValue(videoId, out var cached) && cached.ExpiresUtc > DateTime.UtcNow)
+                return Task.FromResult(cached.Url);
+
+            return _audioUrlPending.GetOrAdd(videoId, id => Task.Run(() => ResolveAndCacheAsync(id)));
+        }
+
+        // Sıradaki şarkıyı arka planda çözer; hata olursa sessizce geçer
+        // (şarkı gerçekten çalınmak istendiğinde yine normal yoldan çözülür)
+        public void PrefetchAudio(string videoId)
+        {
+            if (_audioUrlCache.TryGetValue(videoId, out var cached) && cached.ExpiresUtc > DateTime.UtcNow)
+                return;
+
+            _ = GetAudioStreamUrlAsync(videoId).ContinueWith(
+                t => { _ = t.Exception; },
+                TaskContinuationOptions.OnlyOnFaulted);
+        }
+
+        // Oynatma hatasında (adres erken geçersiz olduysa) önbellekten düşür
+        public void InvalidateAudioUrl(string videoId) => _audioUrlCache.TryRemove(videoId, out _);
+
+        private async Task<string> ResolveAndCacheAsync(string videoId)
+        {
+            try
+            {
+                var url = await ResolveAudioUrlUncachedAsync(videoId);
+
+                _audioUrlCache[videoId] = (url, ParseExpiry(url));
+
+                TrimAudioUrlCache();
+
+                return url;
+            }
+            finally
+            {
+                _audioUrlPending.TryRemove(videoId, out _);
+            }
+        }
+
+        // URL'deki expire=<unix saniye> değerinden 10 dk güvenlik payı düşülür;
+        // bulunamazsa 3 saat varsayılır
+        private static DateTime ParseExpiry(string url)
+        {
+            var match = Regex.Match(url, @"[?&]expire=(\d+)");
+
+            if (match.Success && long.TryParse(match.Groups[1].Value, out var unix))
+            {
+                try
+                {
+                    return DateTimeOffset.FromUnixTimeSeconds(unix).UtcDateTime.AddMinutes(-10);
+                }
+                catch
+                {
+                }
+            }
+
+            return DateTime.UtcNow.AddHours(3);
+        }
+
+        private void TrimAudioUrlCache()
+        {
+            if (_audioUrlCache.Count <= AudioUrlCacheLimit)
+                return;
+
+            foreach (var key in _audioUrlCache
+                         .OrderBy(kv => kv.Value.ExpiresUtc)
+                         .Take(_audioUrlCache.Count - AudioUrlCacheLimit / 2)
+                         .Select(kv => kv.Key)
+                         .ToList())
+            {
+                _audioUrlCache.TryRemove(key, out _);
+            }
+        }
+
         // Önce tercih edilen istemciyle (girişliyse girişli) denenir; YouTube'un
         // istemciye/hesaba özel red durumlarında diğer istemciyle tekrar denenir.
-        public async Task<string> GetAudioStreamUrlAsync(string videoId)
+        private async Task<string> ResolveAudioUrlUncachedAsync(string videoId)
         {
             try
             {

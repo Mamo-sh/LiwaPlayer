@@ -32,12 +32,21 @@
             <Canvas x:Name="canvas" ClipToBounds="True"/>
 
             <!-- Kapak + şarkı bilgisi -->
-            <StackPanel x:Name="infoPanel"
+            <!-- Viewbox: pencere küçülünce kapak + yazı birlikte küçülür (halka
+                 stilinde yazı halkanın altına indiği için içerik daha yüksek olur) -->
+            <Viewbox x:Name="infoPanel"
+                     Stretch="Uniform"
+                     StretchDirection="DownOnly"
+                     HorizontalAlignment="Center"
+                     VerticalAlignment="Center"
+                     Margin="12">
+            <StackPanel x:Name="infoStack"
                         HorizontalAlignment="Center"
                         VerticalAlignment="Center">
 
-                <Grid Width="220" Height="220" HorizontalAlignment="Center">
-                    <Border Background="{DynamicResource Surface2Brush}"
+                <Grid x:Name="coverBox" Width="220" Height="220" HorizontalAlignment="Center">
+                    <Border x:Name="coverBg"
+                            Background="{DynamicResource Surface2Brush}"
                             CornerRadius="16">
                         <TextBlock Text="&#xE8D6;"
                                    FontFamily="Segoe MDL2 Assets"
@@ -46,7 +55,7 @@
                                    HorizontalAlignment="Center"
                                    VerticalAlignment="Center"/>
                     </Border>
-                    <Border CornerRadius="16">
+                    <Border x:Name="coverImg" CornerRadius="16">
                         <Border.Background>
                             <ImageBrush x:Name="brushArt" Stretch="UniformToFill"/>
                         </Border.Background>
@@ -71,6 +80,7 @@
                            TextTrimming="CharacterEllipsis"
                            MaxWidth="600"/>
             </StackPanel>
+            </Viewbox>
         </Grid>
 
         <!-- Kontrol çubuğu: videonun DIŞINDA, her zaman tıklanabilir -->

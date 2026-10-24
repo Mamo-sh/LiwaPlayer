@@ -45,6 +45,10 @@ namespace LiwaPlayer
 
                 // Tema, pencere oluşmadan önce uygulanır ki açılışta yanlış
                 // renklerle bir an görünüp sonra değişmesin
+                Services.ThemeService.SetSchedule(
+                    settings.Current.AutoLightStartMinutes,
+                    settings.Current.AutoDarkStartMinutes);
+
                 Services.ThemeService.Apply(settings.Current.Theme);
             }
             catch

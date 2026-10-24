@@ -322,8 +322,8 @@ namespace LiwaPlayer
 
             switch (_mode)
             {
-                case 1: RenderBottomBars(w, h); break;
-                case 2: RenderMirror(w, h); break;
+                case 1: EnsureRingLayout(false); RenderBottomBars(w, h); break;
+                case 2: EnsureRingLayout(false); RenderMirror(w, h); break;
                 case 3: RenderRing(w, h); break;
             }
         }
@@ -362,17 +362,69 @@ namespace LiwaPlayer
             }
         }
 
+        // Halka stili: kapak daire olur, çubuklar onun çevresinde dönen bir
+        // taç gibi çizilir. Merkez ve yarıçap kapağın EKRANDAKİ gerçek konumundan
+        // alınır (pencere ölçeği ve küçülme dahil); böylece halka kapakla her zaman
+        // eş merkezli kalır ve şarkı yazısının üstüne binmez.
+        private const double RingGap = 12;      // kapak ile çubuklar arası boşluk
+        private const double RingBarMax = 54;   // çubukların en uzun hâli
+        private const double RingTextClear = 6; // çubuklar ile yazı arası boşluk
+
+        private bool _ringLayout;
+
+        // Halka modunda: kapak daire, yazı halkanın altına iner ve üstte halkaya yer açılır.
+        // Diğer modlarda: eski yuvarlatılmış kare kapak ve yakın yazı.
+        private void EnsureRingLayout(bool ring)
+        {
+            if (_ringLayout == ring)
+                return;
+
+            _ringLayout = ring;
+
+            double radius = ring ? 110 : 16;
+
+            coverBg.CornerRadius = new CornerRadius(radius);
+            coverImg.CornerRadius = new CornerRadius(radius);
+
+            // Çubukların kapağın üstüne taşan kısmı da Viewbox'ın hesabına girsin
+            coverBox.Margin = new Thickness(0, ring ? RingGap + RingBarMax : 0, 0, 0);
+
+            txtVisTitle.Margin = new Thickness(0,
+                ring ? 18 + RingGap + RingBarMax + RingTextClear : 18, 0, 2);
+
+            infoStack.UpdateLayout();
+        }
+
         private void RenderRing(double w, double h)
         {
-            double cx = w / 2;
-            double cy = h / 2;
+            EnsureRingLayout(true);
 
-            // Kapak kutusunun (220px, ölçek dahil) hemen dışından başlasın
-            double radius = 130 * UiScaleHelper.Current;
-            double maxLen = Math.Min(w, h) / 2 - radius - 10;
+            if (coverBox.ActualWidth < 1)
+                return;
 
-            if (maxLen < 20)
-                maxLen = 20;
+            Point center, edge;
+
+            try
+            {
+                center = coverBox.TranslatePoint(
+                    new Point(coverBox.ActualWidth / 2, coverBox.ActualHeight / 2), canvas);
+                edge = coverBox.TranslatePoint(
+                    new Point(coverBox.ActualWidth, coverBox.ActualHeight / 2), canvas);
+            }
+            catch (InvalidOperationException)
+            {
+                // Yerleşim henüz hazır değil; bir sonraki karede tekrar denenir
+                return;
+            }
+
+            // Pencere ölçeği ve Viewbox küçültmesinin toplam çarpanı
+            double k = (edge.X - center.X) / (coverBox.ActualWidth / 2);
+
+            if (double.IsNaN(k) || k <= 0)
+                return;
+
+            double radius = (edge.X - center.X) + RingGap * k;
+            double maxLen = RingBarMax * k;
 
             double barWidth = 2 * Math.PI * radius / BarCount * 0.55;
 
@@ -386,8 +438,8 @@ namespace LiwaPlayer
                 bar.Width = barWidth;
                 bar.Height = v;
 
-                Canvas.SetLeft(bar, cx - barWidth / 2);
-                Canvas.SetTop(bar, cy - radius - v);
+                Canvas.SetLeft(bar, center.X - barWidth / 2);
+                Canvas.SetTop(bar, center.Y - radius - v);
 
                 bar.RenderTransformOrigin = new Point(0.5, (radius + v) / v);
                 bar.RenderTransform = new RotateTransform(angle);
