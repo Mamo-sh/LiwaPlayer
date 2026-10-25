@@ -147,7 +147,7 @@ namespace LiwaPlayer
                     if (_playlist.CurrentSong is { Source: SongSource.YouTube } current)
                         _youtube.InvalidateAudioUrl(current.FileName);
 
-                    SetStatus("Çalma hatası oluştu.");
+                    NotifyError("Çalma hatası oluştu.");
                 }));
 
             sliderPosition.PreviewMouseDown += (_, _) => _draggingSlider = true;
@@ -208,7 +208,7 @@ namespace LiwaPlayer
             if (window.ShowDialog() == true)
             {
                 ApplyOptimizationSettings();
-                SetStatus("Ayarlar kaydedildi.");
+                NotifySuccess("Ayarlar kaydedildi.");
             }
         }
 
@@ -312,7 +312,7 @@ namespace LiwaPlayer
             if (!UpdateService.IsConfigured)
             {
                 if (!silent)
-                    SetStatus("Güncelleme kaynağı henüz yapılandırılmamış.");
+                    NotifyWarn("Güncelleme kaynağı henüz yapılandırılmamış.");
                 return;
             }
 
@@ -323,30 +323,50 @@ namespace LiwaPlayer
                 if (update == null)
                 {
                     if (!silent)
-                        SetStatus($"Uygulama güncel (v{UpdateService.CurrentVersion.ToString(3)}).");
+                        NotifySuccess($"Uygulama güncel (v{UpdateService.CurrentVersion.ToString(3)}).");
                     return;
                 }
 
+                if (silent)
+                {
+                    // Açılıştaki otomatik denetimde kullanıcıyı pencereyle bölme:
+                    // tıklanabilir bildirim (pencere tepsideyse Windows balonu) çıkar
+                    Notify($"Yeni sürüm hazır: {update.TagName}. Güncellemek için tıklayın.",
+                        ToastKind.Info, "update", () => ShowUpdateWindow(update), 15000);
+                    return;
+                }
+
+                ShowUpdateWindow(update);
+            }
+            catch (Exception ex)
+            {
+                LogService.Write("Güncelleme denetimi", ex);
+
+                if (!silent)
+                    NotifyError("Güncelleme denetlenemedi: " + ex.Message);
+            }
+        }
+
+        // Güncelleme penceresi: öneri → indirme (yüzde + çizgi) → kurulum başlıyor.
+        // Uygulama, kurulum başlamadan hemen önce bu pencerede ne olacağını gösterir.
+        private void ShowUpdateWindow(UpdateInfo update)
+        {
+            if (_updateInProgress)
+                return;
+
+            _updateInProgress = true;
+
+            bool exiting = false;
+
+            try
+            {
+                // Pencere tepsideyse önce görünür yap ki güncelleme penceresi ortada çıksın
                 ShowFromTray();
 
-                var answer = MessageBox.Show(this,
-                    $"Yeni sürüm hazır: {update.TagName} " +
-                    $"(şu anki sürüm: v{UpdateService.CurrentVersion.ToString(3)})\n\n" +
-                    "Şimdi indirilip kurulsun mu?\n" +
-                    "Kurulum sırasında uygulama kapanır ve otomatik olarak yeniden açılır.",
-                    "LiwaPlayer Güncelleme",
-                    MessageBoxButton.YesNo,
-                    MessageBoxImage.Question);
+                var window = new UpdateWindow(_updater, update) { Owner = this };
 
-                if (answer != MessageBoxResult.Yes)
+                if (window.ShowDialog() != true || string.IsNullOrEmpty(window.DownloadedFile))
                     return;
-
-                _updateInProgress = true;
-
-                var file = await _updater.DownloadAsync(update,
-                    new Progress<int>(p => SetStatus($"Güncelleme indiriliyor... %{p}")));
-
-                SetStatus("Kurulum başlatılıyor...");
 
                 // Yeniden başlayan yeni sürüm bu notları okuyup "Yenilikler"
                 // penceresinde gösterecek (uygulama temasıyla uyumlu, MessageBox değil)
@@ -354,18 +374,20 @@ namespace LiwaPlayer
                 _settings.Current.PendingWhatsNewNotes = update.Notes;
                 _settings.Save();
 
-                _updater.ApplyUpdate(file);
+                _updater.ApplyUpdate(window.DownloadedFile);
 
+                exiting = true;
                 ExitApplication();
             }
             catch (Exception ex)
             {
-                LogService.Write("Güncelleme denetimi", ex);
-
-                _updateInProgress = false;
-
-                if (!silent)
-                    SetStatus("Güncelleme denetlenemedi: " + ex.Message);
+                LogService.Write("Güncelleme başlatma", ex);
+                NotifyError("Güncelleme başlatılamadı: " + ex.Message);
+            }
+            finally
+            {
+                if (!exiting)
+                    _updateInProgress = false;
             }
         }
 
@@ -465,7 +487,7 @@ namespace LiwaPlayer
             }
 
             if (announce)
-                SetStatus($"Arayüz boyutu: %{Math.Round(scale * 100)}");
+                NotifyInfo($"Arayüz boyutu: %{Math.Round(scale * 100)}", "zoom", 1500);
         }
 
         protected override void OnPreviewMouseWheel(MouseWheelEventArgs e)
@@ -493,11 +515,18 @@ namespace LiwaPlayer
 
             _tray.DoubleClick += (_, _) => ShowFromTray();
 
-            // "İnternet yok" balonuna tıklanırsa bekleyen soru sorulur
+            // Balona tıklanınca: bekleyen "indirilenleri dinle" sorusu ya da bildirime bağlı eylem
             _tray.BalloonTipClicked += (_, _) =>
             {
                 if (_offlinePromptPending)
+                {
                     OfferDownloadedPlaylist();
+                    return;
+                }
+
+                var action = _balloonAction;
+                _balloonAction = null;
+                action?.Invoke();
             };
 
             var menu = new WinForms.ContextMenuStrip();
@@ -578,13 +607,13 @@ namespace LiwaPlayer
 
             if (downloaded == null || downloaded.Songs.Count == 0)
             {
-                SetStatus("Henüz indirilmiş bir şarkın yok.");
+                NotifyWarn("Henüz indirilmiş bir şarkın yok.");
                 return;
             }
 
             _playlist.SetActive(downloaded);
             BindActivePlaylist();
-            SetStatus("İndirilen şarkılar listesine geçildi.");
+            NotifyInfo("İndirilen şarkılar listesine geçildi.");
         }
 
         private void OnConnectionRestored()
@@ -598,7 +627,7 @@ namespace LiwaPlayer
                     StringComparison.OrdinalIgnoreCase))
                 return;
 
-            SetStatus("İnternet bağlantısı geri geldi. Müzik listenize geri aktarılıyorsunuz.");
+            NotifySuccess("İnternet bağlantısı geri geldi. Müzik listenize geri aktarılıyorsunuz.");
 
             var music = _playlist.Playlists.FirstOrDefault(p =>
                 string.Equals(p.Name, "Müzik", StringComparison.OrdinalIgnoreCase))
@@ -729,7 +758,53 @@ namespace LiwaPlayer
                 sliderPosition.Value = _player.Position * 100;
         }
 
+        // Durum satırı (şarkı adının altı) YALNIZCA çalma durumunu gösterir:
+        // "YouTube üzerinden çalınıyor", "Duraklatıldı" gibi. Hata, bağlantı,
+        // güncelleme, liste işlemleri gibi haberler bildirim olarak çıkar (Notify).
         private void SetStatus(string message) => txtStatus.Text = message;
+
+        // Pencere tepsideyken balona tıklanınca çalıştırılacak eylem
+        private Action? _balloonAction;
+
+        private void Notify(string message, ToastKind kind = ToastKind.Info,
+            string? key = null, Action? onClick = null, int durationMs = 0)
+        {
+            bool visible = IsVisible && WindowState != WindowState.Minimized;
+
+            if (visible)
+            {
+                toasts.Show(message, kind, key, onClick, durationMs);
+                return;
+            }
+
+            // Pencere tepsideyken sadece uyarı/hata ve tıklanabilir bildirimler
+            // Windows balonu olarak gösterilir; sıradan bilgiler atlanır
+            if (kind is ToastKind.Warning or ToastKind.Error || onClick != null)
+            {
+                _balloonAction = onClick;
+
+                _tray?.ShowBalloonTip(5000, "LiwaPlayer",
+                    message.Length > 240 ? message[..237] + "..." : message,
+                    kind switch
+                    {
+                        ToastKind.Error => WinForms.ToolTipIcon.Error,
+                        ToastKind.Warning => WinForms.ToolTipIcon.Warning,
+                        _ => WinForms.ToolTipIcon.Info
+                    });
+            }
+        }
+
+        private void NotifyInfo(string message, string? key = null, int durationMs = 0) =>
+            Notify(message, ToastKind.Info, key, null, durationMs);
+
+        private void NotifySuccess(string message, string? key = null, int durationMs = 0) =>
+            Notify(message, ToastKind.Success, key, null, durationMs);
+
+        private void NotifyWarn(string message, string? key = null, int durationMs = 0) =>
+            Notify(message, ToastKind.Warning, key, null, durationMs);
+
+        private void NotifyError(string message, string? key = null, int durationMs = 0) =>
+            Notify(message, ToastKind.Error, key, null, durationMs);
 
         // ═══════════════ Kapak ve görselleştirici ═══════════════
 
@@ -797,7 +872,7 @@ namespace LiwaPlayer
         {
             if (_settings.Current.DisableVisualizer)
             {
-                SetStatus("Görselleştirici ayarlardan devre dışı bırakılmış.");
+                NotifyInfo("Görselleştirici ayarlardan devre dışı bırakılmış.");
                 return;
             }
 
@@ -1036,7 +1111,9 @@ namespace LiwaPlayer
                 {
                     if (!File.Exists(song.FileName))
                     {
-                        SetStatus("Dosya bulunamadı: " + Path.GetFileName(song.FileName));
+                        // Durum satırı yalnızca çalma durumunu söyler; ayrıntı bildirimde
+                        SetStatus("Çalınamadı");
+                        NotifyError("Dosya bulunamadı: " + Path.GetFileName(song.FileName));
                         return;
                     }
 
@@ -1062,17 +1139,20 @@ namespace LiwaPlayer
                 if (IsStale())
                     return;
 
+                // "YouTube akışı hazırlanıyor..." eski metninde takılı kalmasın
+                SetStatus("Çalınamadı");
+
                 // YouTube bazı makinelere/IP'lere bot doğrulaması dayatır ve tüm
                 // videolar için "is not available" döndürür; hesap girişi bunu aşar
                 if (ex.Message.Contains("not available", StringComparison.OrdinalIgnoreCase))
                 {
-                    SetStatus(_auth.IsLoggedIn
+                    NotifyError(_auth.IsLoggedIn
                         ? "Video açılamadı. Oturum eskimiş olabilir: kişi simgesinden çıkıp yeniden giriş yapın."
                         : "YouTube bu makinede doğrulama istiyor: kişi simgesinden hesabınla giriş yapıp tekrar deneyin.");
                 }
                 else
                 {
-                    SetStatus("Çalınamadı: " + ex.Message);
+                    NotifyError("Çalınamadı: " + ex.Message);
                 }
             }
         }
@@ -1191,7 +1271,7 @@ namespace LiwaPlayer
             AutomationProperties.SetName(btnRepeat, text);
 
             if (announce)
-                SetStatus(text);
+                NotifyInfo(text, "repeat", 1800);
         }
 
         private void OnPlaybackEnded()
@@ -1202,7 +1282,7 @@ namespace LiwaPlayer
             // Canlı yayın normalde bitmez; buraya düştüyse bağlantı kopmuştur
             if (_playlist.CurrentSong.IsLive)
             {
-                SetStatus("🔴 Yayın koptu, yeniden bağlanılıyor...");
+                NotifyWarn("🔴 Yayın koptu, yeniden bağlanılıyor...");
                 PlaySong(_playlist.CurrentSong, CurrentPlaybackPlaylist);
                 return;
             }
@@ -1221,7 +1301,7 @@ namespace LiwaPlayer
                 // sonsuz döngüye girip YouTube'u yormasın
                 if (DateTime.UtcNow - _playStartedAtUtc < TimeSpan.FromSeconds(3))
                 {
-                    SetStatus("Şarkı tekrarlanamadı (akış hemen sona erdi).");
+                    NotifyWarn("Şarkı tekrarlanamadı (akış hemen sona erdi).");
                     return;
                 }
 
@@ -1300,7 +1380,7 @@ namespace LiwaPlayer
                 }, playlist, out _);
 
                 PlaySong(song, playlist);
-                SetStatus($"✨ Otomatik eklendi: {pick.Title}");
+                NotifyInfo($"✨ Otomatik eklendi: {pick.Title}");
             }
             catch (Exception ex)
             {
@@ -1443,11 +1523,11 @@ namespace LiwaPlayer
             }
 
             if (addedCount == 0)
-                SetStatus("Seçilen şarkılar zaten listede.");
+                NotifyInfo("Seçilen şarkılar zaten listede.");
             else if (birthdayCount > 0)
-                SetStatus($"{addedCount} şarkı eklendi ({birthdayCount} tanesi 🎂 doğum günü listesine).");
+                NotifySuccess($"{addedCount} şarkı eklendi ({birthdayCount} tanesi 🎂 doğum günü listesine).");
             else
-                SetStatus($"{addedCount} şarkı eklendi.");
+                NotifySuccess($"{addedCount} şarkı eklendi.");
         }
 
         private void btnSpotify_Click(object sender, RoutedEventArgs e)
@@ -1459,7 +1539,7 @@ namespace LiwaPlayer
             if (import.ImportedPlaylist != null)
             {
                 BindActivePlaylist();
-                SetStatus($"\"{import.ImportedPlaylist.Name}\" listesi Spotify'dan aktarıldı.");
+                NotifySuccess($"\"{import.ImportedPlaylist.Name}\" listesi Spotify'dan aktarıldı.");
             }
         }
 
@@ -1472,7 +1552,7 @@ namespace LiwaPlayer
             if (import.ImportedPlaylist != null)
             {
                 BindActivePlaylist();
-                SetStatus($"\"{import.ImportedPlaylist.Name}\" listesi YouTube'dan aktarıldı.");
+                NotifySuccess($"\"{import.ImportedPlaylist.Name}\" listesi YouTube'dan aktarıldı.");
             }
         }
 
@@ -1480,7 +1560,7 @@ namespace LiwaPlayer
         {
             if (lstPlaylist.SelectedItem is not Song song)
             {
-                SetStatus("Taşımak için önce listeden bir şarkı seçin.");
+                NotifyWarn("Taşımak için önce listeden bir şarkı seçin.");
                 return;
             }
 
@@ -1490,7 +1570,7 @@ namespace LiwaPlayer
 
             if (targets.Count == 0)
             {
-                SetStatus("Başka liste yok. Önce kütüphane butonundan yeni bir liste oluşturun.");
+                NotifyWarn("Başka liste yok. Önce kütüphane butonundan yeni bir liste oluşturun.");
                 return;
             }
 
@@ -1522,11 +1602,11 @@ namespace LiwaPlayer
         {
             if (!_playlist.MoveSong(song, _playlist.ActivePlaylist, target))
             {
-                SetStatus($"\"{song.Title}\" zaten \"{target.Name}\" listesinde var.");
+                NotifyInfo($"\"{song.Title}\" zaten \"{target.Name}\" listesinde var.");
                 return;
             }
 
-            SetStatus($"\"{song.Title}\" → \"{target.Name}\" listesine taşındı.");
+            NotifySuccess($"\"{song.Title}\" → \"{target.Name}\" listesine taşındı.");
         }
 
         // ═══════════════ MP3 indirme ═══════════════
@@ -1541,15 +1621,16 @@ namespace LiwaPlayer
 
             if (_downloadQueue.Contains(song))
             {
-                SetStatus("Bu şarkı zaten indirme kuyruğunda.");
+                NotifyInfo("Bu şarkı zaten indirme kuyruğunda.");
                 return;
             }
 
             _downloadQueue.Enqueue(song);
 
-            SetStatus(_downloading
+            // Tüm indirme haberleri aynı "download" bildirimini günceller (üst üste yığılmaz)
+            NotifyInfo(_downloading
                 ? $"Kuyruğa eklendi ({_downloadQueue.Count} bekliyor): {song.Title}"
-                : $"İndirme başlıyor: {song.Title}");
+                : $"İndirme başlıyor: {song.Title}", "download");
 
             _ = ProcessDownloadQueueAsync();
         }
@@ -1565,36 +1646,36 @@ namespace LiwaPlayer
             {
                 // yt-dlp + ffmpeg ilk kullanımda otomatik kurulur
                 if (!_downloader.ToolsReady)
-                    await _downloader.EnsureToolsAsync(new Progress<string>(SetStatus));
+                    await _downloader.EnsureToolsAsync(new Progress<string>(s => NotifyInfo(s, "download", 6000)));
 
                 while (_downloadQueue.Count > 0)
                 {
                     var song = _downloadQueue.Dequeue();
 
                     var (ok, filePath) = await _downloader.DownloadMp3Async(song.FileName,
-                        new Progress<int>(p => SetStatus($"⬇ {song.Title} — %{p}")));
+                        new Progress<int>(p => NotifyInfo($"⬇ {song.Title} — %{p}", "download", 3000)));
 
                     if (ok && !string.IsNullOrWhiteSpace(filePath) && File.Exists(filePath))
                     {
                         await AddDownloadedSongToPlaylistAsync(filePath, song);
-                        SetStatus($"✔ İndirildi: {song.Title}  ({DownloadedPlaylistName} listesine eklendi)");
+                        NotifySuccess($"✔ İndirildi: {song.Title}  ({DownloadedPlaylistName} listesine eklendi)", "download");
                     }
                     else if (ok)
                     {
                         // Dosya yolu ayrıştırılamadıysa (beklenmeyen yt-dlp çıktısı)
                         // en azından dosya diskte var, sadece listeye eklenemedi
-                        SetStatus($"✔ İndirildi: {song.Title}  (Müzik\\LiwaPlayer)");
+                        NotifySuccess($"✔ İndirildi: {song.Title}  (Müzik\\LiwaPlayer)", "download");
                     }
                     else
                     {
-                        SetStatus($"İndirilemedi: {song.Title}");
+                        NotifyError($"İndirilemedi: {song.Title}", "download");
                     }
                 }
             }
             catch (Exception ex)
             {
                 LogService.Write("MP3 indirme", ex);
-                SetStatus("İndirme hatası: " + ex.Message);
+                NotifyError("İndirme hatası: " + ex.Message, "download");
                 _downloadQueue.Clear();
             }
             finally
@@ -1647,9 +1728,13 @@ namespace LiwaPlayer
             lstPlaylist.SelectedItem = added;
             lstPlaylist.ScrollIntoView(added);
 
-            _tray?.ShowBalloonTip(3000, "LiwaPlayer",
-                $"\"{added.Title}\" indirildi ve \"{DownloadedPlaylistName}\" listesine eklendi.",
-                WinForms.ToolTipIcon.Info);
+            // Pencere görünürken bildirim kutusu zaten gösteriliyor; balon yalnızca tepsideyken
+            if (!IsVisible)
+            {
+                _tray?.ShowBalloonTip(3000, "LiwaPlayer",
+                    $"\"{added.Title}\" indirildi ve \"{DownloadedPlaylistName}\" listesine eklendi.",
+                    WinForms.ToolTipIcon.Info);
+            }
         }
 
         private void btnDelete_Click(object sender, RoutedEventArgs e) => RemoveSelectedSong();
@@ -1658,7 +1743,7 @@ namespace LiwaPlayer
         {
             if (lstPlaylist.SelectedItem is not Song song)
             {
-                SetStatus("Silmek için önce listeden şarkı seçin.");
+                NotifyWarn("Silmek için önce listeden şarkı seçin.");
                 return;
             }
 
@@ -1670,7 +1755,7 @@ namespace LiwaPlayer
             if (wasCurrent)
                 StopPlayback();
 
-            SetStatus("Şarkı listeden çıkarıldı.");
+            NotifySuccess("Şarkı listeden çıkarıldı.");
         }
 
         private void btnClear_Click(object sender, RoutedEventArgs e)
@@ -1698,7 +1783,7 @@ namespace LiwaPlayer
             if (currentWasHere)
                 StopPlayback();
 
-            SetStatus($"\"{active.Name}\" listesi temizlendi.");
+            NotifySuccess($"\"{active.Name}\" listesi temizlendi.");
         }
 
         // ═══════════════ YouTube hesap girişi ═══════════════
@@ -1804,16 +1889,16 @@ namespace LiwaPlayer
             if (!_auth.IsLoggedIn)
             {
                 ShowFromTray();
-                SetStatus("Önce YouTube hesabınla giriş yapmalısın.");
+                NotifyWarn("Önce YouTube hesabınla giriş yapmalısın.");
                 return;
             }
 
             ShowFromTray();
-            SetStatus("Hesap bilgileri yenileniyor...");
+            NotifyInfo("Hesap bilgileri yenileniyor...", "account");
 
             await OnLoggedInAsync();
 
-            SetStatus("Hesap bilgileri yenilendi.");
+            NotifySuccess("Hesap bilgileri yenilendi.", "account");
         }
 
         private async Task ImportSpecialPlaylistsAsync()
@@ -1847,7 +1932,7 @@ namespace LiwaPlayer
                     syncedCount++;
                 }
 
-                SetStatus($"Hesabındaki {syncedCount} oynatma listesi senkronize edildi.");
+                NotifySuccess($"Hesabındaki {syncedCount} oynatma listesi senkronize edildi.", "sync");
             }
             catch (Exception ex)
             {
@@ -1891,7 +1976,7 @@ namespace LiwaPlayer
                 }
 
                 if (added > 0)
-                    SetStatus($"\"{name}\" listesi güncellendi (+{added} şarkı).");
+                    NotifySuccess($"\"{name}\" listesi güncellendi (+{added} şarkı).", "sync");
             }
             catch (Exception ex)
             {
@@ -1917,7 +2002,7 @@ namespace LiwaPlayer
                 _youtube.SetAuthCookies(null);
 
                 UpdateAccountButton();
-                SetStatus("YouTube oturumu kapatıldı.");
+                NotifyInfo("YouTube oturumu kapatıldı.");
                 return;
             }
 
@@ -1929,7 +2014,7 @@ namespace LiwaPlayer
                 _youtube.SetAuthCookies(_auth.Cookies);
 
                 UpdateAccountButton();
-                SetStatus("YouTube girişi yapıldı. Premium hesapta akışlar reklamsızdır.");
+                NotifySuccess("YouTube girişi yapıldı. Premium hesapta akışlar reklamsızdır.");
 
                 _ = OnLoggedInAsync();
             }
@@ -2082,7 +2167,8 @@ namespace LiwaPlayer
                         Title = video.Title,
                         Artist = video.Author,
                         Duration = video.Duration,
-                        Source = SongSource.YouTube
+                        Source = SongSource.YouTube,
+                        CoverImage = video.ThumbnailUrl
                     };
 
                     _playlist.Add(song, target, out _);
@@ -2095,7 +2181,7 @@ namespace LiwaPlayer
                 txtSearchHint.Text = "Şarkı veya sanatçı adı yazıp Enter'a basın.";
                 txtSearchHint.Visibility = Visibility.Visible;
 
-                SetStatus($"\"{finalName}\" içe aktarıldı ({videos.Count} şarkı).");
+                NotifySuccess($"\"{finalName}\" içe aktarıldı ({videos.Count} şarkı).");
             }
             catch (Exception ex)
             {
@@ -2138,11 +2224,11 @@ namespace LiwaPlayer
             AddResultToPlaylist(result, out bool added, out Playlist target);
 
             if (!added)
-                SetStatus($"Bu şarkı \"{target.Name}\" listesinde zaten var.");
+                NotifyInfo($"Bu şarkı \"{target.Name}\" listesinde zaten var.");
             else if (target != _playlist.ActivePlaylist)
-                SetStatus($"🎂 Doğum günü şarkısı algılandı, \"{target.Name}\" listesine eklendi.");
+                NotifySuccess($"🎂 Doğum günü şarkısı algılandı, \"{target.Name}\" listesine eklendi.");
             else
-                SetStatus($"\"{target.Name}\" listesine eklendi.");
+                NotifySuccess($"\"{target.Name}\" listesine eklendi.");
         }
 
         private void btnPlayResult_Click(object sender, RoutedEventArgs e)

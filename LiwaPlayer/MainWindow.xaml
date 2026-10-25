@@ -1,6 +1,7 @@
 ﻿<Window x:Class="LiwaPlayer.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:LiwaPlayer"
         Title="LiwaPlayer"
         Height="620"
         Width="1000"
@@ -619,13 +620,22 @@
                                 Style="{StaticResource IconButton}"
                                 FontSize="14"
                                 Content="&#xE713;"
-                                ToolTip="Optimizasyon ayarları"
-                                AutomationProperties.Name="Optimizasyon ayarları"
+                                ToolTip="Ayarlar"
+                                AutomationProperties.Name="Ayarlar"
                                 Click="btnSettings_Click"/>
                     </StackPanel>
                 </Grid>
             </Grid>
         </Border>
+
+        <!-- ═══ Bildirimler: hata, bağlantı, güncelleme gibi haberler (durum satırı yalnızca çalma durumu içindir) ═══ -->
+        <!-- Alt sağda, oynatıcı çubuğunun hemen üstünde: sekmeleri ve arama kutusunu kapatmasın -->
+        <local:ToastPanel x:Name="toasts"
+                          Grid.Row="1"
+                          HorizontalAlignment="Right"
+                          VerticalAlignment="Bottom"
+                          Margin="0,0,10,10"
+                          Panel.ZIndex="100"/>
 
     </Grid>
 

@@ -1,0 +1,95 @@
+<Window x:Class="LiwaPlayer.UpdateWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="LiwaPlayer Güncelleme"
+        Width="440"
+        SizeToContent="Height"
+        ResizeMode="NoResize"
+        Background="{DynamicResource BgBrush}"
+        FontFamily="Segoe UI"
+        WindowStartupLocation="CenterOwner"
+        Closing="Window_Closing">
+
+    <StackPanel Margin="32,28,32,28">
+
+        <!-- Simge: verilen görsel, tema vurgu rengiyle boyanır (koyu/açık temada okunur) -->
+        <Grid Width="116" Height="116" HorizontalAlignment="Center" Margin="0,0,0,18">
+            <Rectangle x:Name="iconRect"
+                       Width="104" Height="104"
+                       Fill="{DynamicResource AccentBrush}"
+                       RenderTransformOrigin="0.5,0.5">
+                <Rectangle.OpacityMask>
+                    <ImageBrush ImageSource="/Assets/update-icon.png" Stretch="Uniform"/>
+                </Rectangle.OpacityMask>
+                <Rectangle.RenderTransform>
+                    <RotateTransform x:Name="iconRotate" Angle="0"/>
+                </Rectangle.RenderTransform>
+            </Rectangle>
+        </Grid>
+
+        <TextBlock x:Name="txtTitle"
+                   Text="Yeni sürüm hazır"
+                   FontSize="21"
+                   FontWeight="SemiBold"
+                   Foreground="{DynamicResource TextBrush}"
+                   TextAlignment="Center"
+                   TextWrapping="Wrap"/>
+
+        <TextBlock x:Name="txtSub"
+                   Text=""
+                   Style="{StaticResource MutedText}"
+                   FontSize="13"
+                   TextAlignment="Center"
+                   TextWrapping="Wrap"
+                   Margin="0,6,0,0"/>
+
+        <!-- İndirme ilerlemesi (yalnızca indirirken görünür) -->
+        <StackPanel x:Name="panelProgress" Visibility="Collapsed" Margin="0,22,0,0">
+
+            <TextBlock x:Name="txtPercent"
+                       Text="%0"
+                       FontSize="34"
+                       FontWeight="SemiBold"
+                       Foreground="{DynamicResource AccentBrush}"
+                       TextAlignment="Center"/>
+
+            <ProgressBar x:Name="bar"
+                         Style="{StaticResource ModernProgress}"
+                         Height="8"
+                         Minimum="0"
+                         Maximum="100"
+                         Value="0"
+                         Margin="0,10,0,0"
+                         AutomationProperties.Name="Güncelleme indirme ilerlemesi"/>
+
+            <TextBlock x:Name="txtBytes"
+                       Text=""
+                       Style="{StaticResource MutedText}"
+                       FontSize="12"
+                       TextAlignment="Center"
+                       Margin="0,8,0,0"/>
+        </StackPanel>
+
+        <StackPanel x:Name="panelButtons"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Center"
+                    Margin="0,26,0,0">
+
+            <Button x:Name="btnPrimary"
+                    Style="{StaticResource TextButton}"
+                    Content="Şimdi güncelle"
+                    IsDefault="True"
+                    MinWidth="130"
+                    Click="btnPrimary_Click"/>
+
+            <Button x:Name="btnSecondary"
+                    Style="{StaticResource SecondaryTextButton}"
+                    Content="Daha sonra"
+                    IsCancel="True"
+                    Margin="10,0,0,0"
+                    MinWidth="100"
+                    Click="btnSecondary_Click"/>
+        </StackPanel>
+    </StackPanel>
+
+</Window>

@@ -8,7 +8,7 @@
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
     <ApplicationIcon>lwplay.ico</ApplicationIcon>
-    <Version>1.3.6</Version>
+    <Version>1.3.7</Version>
     <Company>Liwa</Company>
     <Product>LiwaPlayer</Product>
   </PropertyGroup>
@@ -34,6 +34,7 @@
 
   <ItemGroup>
     <Resource Include="Assets\youtube-logo.png" />
+    <Resource Include="Assets\update-icon.png" />
   </ItemGroup>
 
   <ItemGroup>

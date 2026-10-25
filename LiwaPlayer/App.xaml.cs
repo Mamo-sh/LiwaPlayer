@@ -6,8 +6,26 @@ namespace LiwaPlayer
 {
     public partial class App : Application
     {
-        private const string MutexName = @"Local\LiwaPlayer_SingleInstance";
-        private const string ShowEventName = @"Local\LiwaPlayer_ShowSignal";
+        // Farklı bir veri klasörüyle (LIWAPLAYER_DATA) açılan kopya, normal kopyanın
+        // kilidine takılmasın: kilit adına veri klasörünün özeti eklenir. Böylece
+        // gerçek uygulama çalışırken izole bir test kopyası da açılabilir.
+        private static readonly string InstanceSuffix = BuildInstanceSuffix();
+
+        private static readonly string MutexName = @"Local\LiwaPlayer_SingleInstance" + InstanceSuffix;
+        private static readonly string ShowEventName = @"Local\LiwaPlayer_ShowSignal" + InstanceSuffix;
+
+        private static string BuildInstanceSuffix()
+        {
+            var custom = Environment.GetEnvironmentVariable("LIWAPLAYER_DATA");
+
+            if (string.IsNullOrWhiteSpace(custom))
+                return "";
+
+            var hash = System.Security.Cryptography.SHA1.HashData(
+                System.Text.Encoding.UTF8.GetBytes(System.IO.Path.GetFullPath(custom).ToLowerInvariant()));
+
+            return "_" + Convert.ToHexString(hash, 0, 6);
+        }
 
         private static Mutex? _singleInstanceMutex;
         private EventWaitHandle? _showEvent;
